@@ -19,9 +19,9 @@ function seed() {
   // Mia already has a few favourites on her profile
   players.demo0.games = [
     { id: 13, name: 'Catan', year: 1995 },
-    { id: 230802, name: 'Azul', year: 2017 },
+    { id: 230802, name: 'Azul', year: 2017, fav: true },
     { id: 266192, name: 'Wingspan', year: 2019 },
-    { id: 359871, name: 'Arcs', year: 2024 },
+    { id: 359871, name: 'Arcs', year: 2024, fav: true },
   ];
   const keys = upcomingDays(7).map((d) => d.key);
   const days = {

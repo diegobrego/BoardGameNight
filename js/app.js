@@ -6,7 +6,7 @@ import { upcomingDays, pastDays, longLabel, rangeLabel } from './dates.js';
 import { buildIcs } from './ics.js';
 import { tally, ranked as rankList, newestFirst, playerStats, awardTitles } from './hall.js';
 import { sessionsOf, plannedOn, campaignRecord, sortCampaigns, defaultTitle, can, outsiders } from './campaigns.js';
-import { MAX_MY_GAMES, hasGame, withGame, withoutGame, matchMine, byName as gamesByName } from './mygames.js';
+import { MAX_MY_GAMES, hasGame, withGame, withoutGame, toggleFav, ordered, matchMine } from './mygames.js';
 import {
   loadGames, isLoaded, findGame, searchGames, bggUrl, bggSearchUrl, parseBggLink, titleFromSlug, voteKey,
 } from './games.js';
@@ -682,6 +682,7 @@ function openDay(key) {
             <label class="sr-only" for="game-q">Search for a game</label>
             <input id="game-q" type="search" placeholder="Search BoardGameGeek, or paste a link" enterkeyhint="search" spellcheck="false">
             <ul id="game-results" class="results"></ul>
+            <button type="button" class="btn" data-action="open-collection">${icon('box', 2)} Add game from collection <span id="dp-coll-count" class="count"></span></button>
             <button type="button" class="btn" data-action="adder-close">Cancel</button>
           </form>
         </div>
@@ -861,15 +862,15 @@ function closeAdder() {
   $('#game-results').innerHTML = '';
 }
 
-function resultButton(game, hint = '', mine = false) {
-  return `<li><button type="button" class="result${mine ? ' result--mine' : ''}" data-action="add-game" data-id="${game.id ?? ''}" data-name="${esc(game.name)}" data-year="${game.year || ''}">
-    ${mine ? icon('star', 2) : ''}<span class="result-name">${esc(game.name)}</span>
+function resultButton(game, hint = '') {
+  return `<li><button type="button" class="result" data-action="add-game" data-id="${game.id ?? ''}" data-name="${esc(game.name)}" data-year="${game.year || ''}">
+    <span class="result-name">${esc(game.name)}</span>
     <span class="result-meta">${hint || (game.year ? game.year : '')}</span>
     ${icon('plus', 2)}
   </button></li>`;
 }
 
-// My own list of favourite / owned games (kept on my profile).
+// My collection: the games I own or love, kept on my profile. Favourites are marked with a star.
 const myGames = () => state.players[state.me]?.games ?? [];
 
 function renderResults() {
@@ -877,32 +878,19 @@ function renderResults() {
   if (!input) return;
   const raw = input.value.trim();
   const out = [];
+  const count = $('#dp-coll-count');
+  if (count) count.textContent = myGames().length || '';
 
   const link = parseBggLink(raw);
-  // My games come first: all of them while nothing is typed, the matching ones once it is, and
-  // never one that's already on this day's list.
-  const onDay = state.days[state.openKey]?.games ?? [];
-  const mineHits = link ? [] : matchMine(myGames().filter((g) => !hasGame(onDay, g)), raw.length >= 2 ? raw : '');
-  if (mineHits.length) {
-    out.push(`<li class="results-head">${icon('star', 2)}<span>My games</span></li>`);
-    mineHits.forEach((g) => out.push(resultButton(g, '', true)));
-  }
-  if (!link && !raw && state.me) {
-    out.push(myGames().length
-      ? '<li><button type="button" class="link-btn" data-action="my-games">Edit my games</button></li>'
-      : '<li class="muted">Tip: save the games you own or love in your profile, and they\'ll show up here, so you never have to search for them.</li><li><button type="button" class="link-btn" data-action="my-games">Add my games</button></li>');
-  }
-
   if (link) {
     const known = findGame(link.id);
     const name = known?.name ?? (link.slug ? titleFromSlug(link.slug) : `BGG game #${link.id}`);
     out.push(resultButton({ id: link.id, name, year: known?.year ?? 0 }, 'from link'));
   } else if (raw.length >= 2) {
     if (isLoaded()) {
-      if (mineHits.length) out.push('<li class="results-head"><span>Game list</span></li>');
-      const hits = searchGames(raw).filter((g) => !hasGame(mineHits, g));
+      const hits = searchGames(raw);
       hits.forEach((g) => out.push(resultButton(g)));
-      if (!hits.length && !mineHits.length) out.push('<li class="muted">No match in the game list.</li>');
+      if (!hits.length) out.push('<li class="muted">No match in the game list.</li>');
     } else if (state.gamesFailed) {
       out.push("<li class=\"muted\">Couldn't load the game list. You can still add it by name.</li>");
     } else {
@@ -944,20 +932,21 @@ async function removeGame(el) {
 }
 
 // ---------------------------------------------------------------------------
-// my games: a list of favourite / owned games on my profile, offered first when adding a game
+// my collection: the games I own or love, kept on my profile. Favourites get a star. "Add game
+// from collection" on a day lists them, so there's no need to search for them every time.
 // ---------------------------------------------------------------------------
 
 function openMyGames() {
   if (!state.me) return openWho('choose');
-  openSheet('My games', `
-    <p class="muted">Your favourites and the games you own. They show first when you add a game to a day, so you don't have to search every time.</p>
+  openSheet('My collection', `
+    <p class="muted">The games you own or love. Tap the star to mark a favourite; favourites come first. When you add a game to a day, <em>Add game from collection</em> lists them, so you don't have to search every time.</p>
     <div class="field">
       <label class="sr-only" for="mg-q">Search for a game to add</label>
       <input id="mg-q" type="search" placeholder="Search to add a game, or type a name" enterkeyhint="search" spellcheck="false">
       <ul id="mg-results" class="results"></ul>
     </div>
     <section class="block">
-      <h3 class="h-small">My list <span id="mg-count" class="count"></span></h3>
+      <h3 class="h-small">My games <span id="mg-count" class="count"></span></h3>
       <div id="mg-list"></div>
     </section>
     <div class="row"><button type="button" class="btn btn--solid" data-action="close-dialog">Done</button></div>`);
@@ -970,9 +959,13 @@ function openMyGames() {
   $('#mg-q').focus();
 }
 
-// The list itself, with a remove button on each game. Also keeps the count in the profile in step.
+// The star that marks a game as a favourite (or takes the mark off again).
+const favButton = (g) => `<button type="button" class="fav-btn${g.fav ? ' is-on' : ''}" data-action="fav-toggle" data-gk="${esc(voteKey(g))}" aria-pressed="${!!g.fav}" aria-label="${g.fav ? `Take ${esc(g.name)} off my favourites` : `Mark ${esc(g.name)} as a favourite`}">${icon(g.fav ? 'star' : 'staroutline', 2)}</button>`;
+
+// The list itself, favourites first, with a star and a remove button on each game. Also keeps
+// the count in the profile in step.
 function renderMyGames() {
-  const games = gamesByName(myGames());
+  const games = ordered(myGames());
   const profileCount = $('#who-games-count');
   if (profileCount) profileCount.textContent = games.length;
   const list = $('#mg-list');
@@ -981,13 +974,57 @@ function renderMyGames() {
   list.innerHTML = games.length
     ? `<ul class="mygames">${games.map((g) => `
         <li>
+          ${favButton(g)}
           <a class="game-link" href="${esc(g.id ? bggUrl(g.id) : bggSearchUrl(g.name))}" target="_blank" rel="noopener noreferrer">
             <span class="game-name">${esc(g.name)}</span>${g.year ? `<span class="game-year">${g.year}</span>` : ''}${icon('arrow', 2)}
             <span class="sr-only">(opens BoardGameGeek)</span>
           </a>
-          <button type="button" class="icon-btn icon-btn--small" data-action="mg-remove" data-gk="${esc(voteKey(g))}" aria-label="Remove ${esc(g.name)} from my games">${icon('x', 2)}</button>
+          <button type="button" class="icon-btn icon-btn--small" data-action="mg-remove" data-gk="${esc(voteKey(g))}" aria-label="Remove ${esc(g.name)} from my collection">${icon('x', 2)}</button>
         </li>`).join('')}</ul>`
     : '<p class="muted">Nothing here yet. Search above and tap a game to add it.</p>';
+}
+
+// "Add game from collection": everything in my collection, to pick for the open day. Tap a game
+// to add it to the day; the star marks a favourite right here too. Games already on that day
+// are greyed out.
+function openCollection() {
+  if (!state.me) return openWho('choose');
+  if (dayByKey(state.openKey)?.isPast) return toast('That day has passed.');
+  openSheet('Add from my collection', `
+    <div id="coll-filter-wrap" class="field">
+      <label class="sr-only" for="coll-q">Filter my collection</label>
+      <input id="coll-q" type="search" placeholder="Filter my collection" spellcheck="false">
+    </div>
+    <div id="coll-list"></div>
+    <div class="row">
+      <button type="button" class="btn" data-action="my-games">${icon('box', 2)} Edit my collection</button>
+      <button type="button" class="btn" data-action="close-dialog">Close</button>
+    </div>`);
+  renderCollection();
+  if (myGames().length > 6) $('#coll-q').focus();
+}
+
+function renderCollection() {
+  const list = $('#coll-list');
+  if (!list) return;
+  const all = myGames();
+  $('#coll-filter-wrap').hidden = all.length <= 6;     // a short list needs no filter
+  const q = $('#coll-q').value.trim();
+  const onDay = state.days[state.openKey]?.games ?? [];
+  const shown = matchMine(all, q);
+  list.innerHTML = !all.length
+    ? '<p class="muted">Your collection is empty. Use <em>Edit my collection</em> to add the games you own or love, and they\'ll be here next time.</p>'
+    : !shown.length
+      ? '<p class="muted">No game in your collection matches that.</p>'
+      : `<ul class="coll-list">${shown.map((g) => {
+        const there = hasGame(onDay, g);
+        return `<li class="coll-row${there ? ' is-there' : ''}">
+          ${favButton(g)}
+          ${there
+    ? `<span class="coll-add"><span class="coll-name">${esc(g.name)}</span>${g.year ? `<span class="game-year">${g.year}</span>` : ''}<span class="muted">on this day</span>${icon('check', 2)}</span>`
+    : `<button type="button" class="coll-add" data-action="coll-add" data-id="${g.id ?? ''}" data-name="${esc(g.name)}" data-year="${g.year || ''}"><span class="coll-name">${esc(g.name)}</span>${g.year ? `<span class="game-year">${g.year}</span>` : ''}${icon('plus', 2)}</button>`}
+        </li>`;
+      }).join('')}</ul>`;
 }
 
 function renderMyResults() {
@@ -1024,6 +1061,17 @@ async function saveMyGames(next) {
   await state.store.setPlayerGames(state.me, next);
   if (state.players[state.me]) state.players[state.me] = { ...state.players[state.me], games: next };
   renderMyGames();
+  renderCollection();
+}
+
+// The star, in "My collection" and in "Add game from collection".
+async function toggleFavourite(key) {
+  if (!state.me) return;
+  try {
+    await saveMyGames(toggleFav(myGames(), key));
+  } catch (err) {
+    fail(err, "Couldn't save that. Please try again.");
+  }
 }
 
 async function addMyGame(game) {
@@ -1837,17 +1885,17 @@ function openPlayerCard(id) {
         </ul>
       </div>`;
   }
-  // Their list of favourite / owned games (see "My games"). A short list starts open; a long one
-  // starts closed, so it doesn't push the stats off the card.
-  const theirs = gamesByName(player.games ?? []);
+  // Their collection (see "My collection"), favourites first and starred. A short list starts
+  // open; a long one starts closed, so it doesn't push the stats off the card.
+  const theirs = ordered(player.games ?? []);
   const mineCard = id === state.me;
   const gamesBlock = `
     <details class="card-games"${theirs.length <= 8 ? ' open' : ''}>
-      <summary><span class="h-small">Favourite &amp; owned games</span> <span class="count">${theirs.length}</span>${icon('chevron', 2)}</summary>
+      <summary><span class="h-small">Collection</span> <span class="count">${theirs.length}</span>${icon('chevron', 2)}</summary>
       ${theirs.length
-    ? `<ul class="game-chips">${theirs.map((g) => `<li><a class="game-chip" href="${esc(g.id ? bggUrl(g.id) : bggSearchUrl(g.name))}" target="_blank" rel="noopener noreferrer">${esc(g.name)}${g.year ? ` <span class="game-year">${g.year}</span>` : ''}<span class="sr-only">(opens BoardGameGeek)</span></a></li>`).join('')}</ul>`
-    : `<p class="muted">${mineCard ? "You haven't saved any yet." : `${esc(player.name)} hasn't saved any yet.`}</p>`}
-      ${mineCard ? '<button type="button" class="link-btn" data-action="my-games">Edit my games</button>' : ''}
+    ? `<ul class="game-chips">${theirs.map((g) => `<li><a class="game-chip${g.fav ? ' is-fav' : ''}" href="${esc(g.id ? bggUrl(g.id) : bggSearchUrl(g.name))}" target="_blank" rel="noopener noreferrer">${g.fav ? `${icon('star', 2)}<span class="sr-only">Favourite: </span>` : ''}${esc(g.name)}${g.year ? ` <span class="game-year">${g.year}</span>` : ''}<span class="sr-only">(opens BoardGameGeek)</span></a></li>`).join('')}</ul>`
+    : `<p class="muted">${mineCard ? "You haven't added any games yet." : `${esc(player.name)} hasn't added any games yet.`}</p>`}
+      ${mineCard ? '<button type="button" class="link-btn" data-action="my-games">Edit my collection</button>' : ''}
     </details>`;
   $('#player-dialog').innerHTML = `
     <div class="sheet-head"><h2>Player card</h2>${closeBtn()}</div>
@@ -1978,9 +2026,9 @@ function renderWho() {
       </fieldset>
       ${editing ? `
       <section class="block">
-        <h3 class="h-small">My games <span id="who-games-count" class="count">${myGames().length}</span></h3>
-        <p class="muted">Your favourites and the games you own. They show first when you add a game to a day.</p>
-        <button type="button" class="btn" data-action="my-games">${icon('box', 2)} Manage my games</button>
+        <h3 class="h-small">My collection <span id="who-games-count" class="count">${myGames().length}</span></h3>
+        <p class="muted">The games you own or love, with a star for your favourites. Pick from them when you add a game to a day.</p>
+        <button type="button" class="btn" data-action="my-games">${icon('box', 2)} Manage my collection</button>
       </section>` : ''}
       <p id="who-error" class="error" role="alert" hidden></p>
       <div class="row">
@@ -2184,6 +2232,12 @@ const actions = {
   'adder-open': openAdder,
   'adder-close': closeAdder,
   'my-games': openMyGames,
+  'open-collection': openCollection,
+  'coll-add': (el) => {
+    $('#form-dialog').close();
+    addGame({ id: Number(el.dataset.id) || null, name: el.dataset.name, year: Number(el.dataset.year) || 0 });
+  },
+  'fav-toggle': (el) => toggleFavourite(el.dataset.gk),
   'mg-add': (el) => addMyGame({ id: Number(el.dataset.id) || null, name: el.dataset.name, year: Number(el.dataset.year) || 0 }),
   'mg-remove': (el) => removeMyGame(el.dataset.gk),
   'add-game': (el) => addGame({
@@ -2330,6 +2384,7 @@ document.addEventListener('input', (e) => {
   if (e.target.id === 'log-q') renderLogResults();
   if (e.target.id === 'camp-q') renderCampResults();
   if (e.target.id === 'mg-q') renderMyResults();
+  if (e.target.id === 'coll-q') renderCollection();
 });
 
 document.addEventListener('change', (e) => {

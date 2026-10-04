@@ -14,6 +14,8 @@ const ICONS = {
   arrow: `<path ${LINE} d="M7 17L17 7M9 7h8v8"/>`,
   star: '<path fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" '
     + 'd="M12 2.8l2.8 5.9 6.4.9-4.7 4.5 1.2 6.4L12 17.4l-5.7 3.1 1.2-6.4-4.7-4.5 6.4-.9z"/>',
+  staroutline: '<path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" '
+    + 'd="M12 2.8l2.8 5.9 6.4.9-4.7 4.5 1.2 6.4L12 17.4l-5.7 3.1 1.2-6.4-4.7-4.5 6.4-.9z"/>',
   bell: `<path ${LINE} stroke-width="2.6" d="M6.2 9a5.8 5.8 0 0 1 11.6 0c0 6.4 2.7 8.2 2.7 8.2h-17S6.2 15.4 6.2 9z"/>`
     + `<path ${LINE} stroke-width="2.6" d="M10.2 20.8a2 2 0 0 0 3.6 0"/>`,
   flag: `<path ${LINE} stroke-width="2.4" d="M5.5 21V3.5"/>`

@@ -615,22 +615,29 @@ input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; d
 .result-name { flex: 1; font-weight: 700; }
 .result-meta { opacity: .7; font-size: 14px; }
 .result--link { border-style: dashed; }
-/* my own favourite / owned games, offered first when adding a game to a day */
-.results-head {
-  display: flex; align-items: center; gap: 6px; padding: 2px 2px 0;
-  font-size: 13px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
-}
-.results-head .ico { width: 14px; height: 14px; }
-.result--mine { background: hsl(48 95% 92%); border-color: var(--line); }
-:root[data-theme="dark"] .result--mine { background: hsl(48 40% 20%); }
-.result--mine .ico:first-child { color: #d99a00; }
+/* my collection: the games I own or love, with a star on the favourites */
 .result.is-on { border-style: dotted; opacity: .7; }
-#game-results { max-height: 46vh; overflow-y: auto; padding: 2px; }
-.mygames { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.mygames li {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 4px 6px 4px 12px; border: var(--bw) solid var(--line); border-radius: 10px;
+.fav-btn {
+  display: grid; place-items: center; flex: none; width: 34px; height: 34px; padding: 0;
+  background: none; border: 0; border-radius: 9px; color: var(--ink); opacity: .55;
 }
+.fav-btn .ico { width: 20px; height: 20px; }
+.fav-btn.is-on { color: #d99a00; opacity: 1; }
+@media (hover: hover) { .fav-btn:hover { opacity: 1; background: var(--paper); } }
+.mygames, .coll-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.mygames li, .coll-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 6px 3px 3px; border: var(--bw) solid var(--line); border-radius: 10px;
+}
+.mygames .game-link { flex: 1; min-width: 0; }
+.coll-row.is-there { border-style: dotted; opacity: .7; }
+.coll-add {
+  display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; padding: 4px 6px;
+  background: none; border: 0; border-radius: 8px; color: inherit; font-weight: 700; text-align: left;
+}
+.coll-name { flex: 1; min-width: 0; }
+.coll-add .game-year { font-weight: 400; opacity: .7; }
+@media (hover: hover) { button.coll-add:hover { background: var(--solid); color: var(--on-solid); } }
 
 /* who are you */
 .pick-list { display: grid; gap: 8px; }
@@ -845,6 +852,8 @@ button.pill { color: inherit; }
 }
 :root[data-theme="dark"] .game-chip { background: hsl(48 40% 20%); }
 .game-chip .game-year { font-weight: 400; opacity: .7; }
+.game-chip.is-fav { display: inline-flex; align-items: center; gap: 4px; }
+.game-chip.is-fav .ico { width: 13px; height: 13px; color: #d99a00; }
 @media (hover: hover) { .game-chip:hover { text-decoration: underline; text-underline-offset: 3px; } }
 .titles { display: flex; flex-wrap: wrap; gap: 8px; }
 .title-tag {

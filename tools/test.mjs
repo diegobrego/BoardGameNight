@@ -8,7 +8,7 @@ import { buildIcs } from '../js/ics.js';
 import { tally, ranked, newestFirst, playerStats, awardTitles } from '../js/hall.js';
 import { pastDays, upcomingDays } from '../js/dates.js';
 import { sessionsOf, plannedOn, campaignRecord, sortCampaigns, defaultTitle, can, outsiders } from '../js/campaigns.js';
-import { MAX_MY_GAMES, hasGame, withGame, withoutGame, matchMine } from '../js/mygames.js';
+import { MAX_MY_GAMES, hasGame, withGame, withoutGame, toggleFav, ordered, matchMine } from '../js/mygames.js';
 import { voteKey } from '../js/games.js';
 
 const encoder = new TextEncoder();
@@ -324,6 +324,18 @@ const root = new URL('..', import.meta.url);
   assert.deepEqual(matchMine([...list, { id: 1, name: 'Star Realms' }], 'ar').map((g) => g.name), ['Arcs', 'Star Realms'], 'names starting with it come first');
   assert.deepEqual(matchMine(list, 'CAFE').map((g) => g.name), ['Café Bonito!'], 'case and accents are ignored');
   assert.deepEqual(matchMine(list, 'zzz'), [], 'nothing matches');
+
+  // favourites: marked with fav, and listed first
+  const marked = toggleFav(list, voteKey(arcs));
+  assert.equal(marked.find((g) => g.id === 359871).fav, true, 'marked as a favourite');
+  assert.equal('fav' in marked.find((g) => g.id === 230802), false, 'the others carry no fav field at all');
+  assert.equal('fav' in toggleFav(marked, voteKey(arcs)).find((g) => g.id === 359871), false, 'tapping again unmarks it and drops the field');
+  assert.deepEqual(ordered(marked).map((g) => g.name), ['Arcs', 'Azul', 'Café Bonito!'], 'favourites first, then A to Z');
+  const twoFavs = toggleFav(toggleFav(list, voteKey(byName)), voteKey(azul));
+  assert.deepEqual(ordered(twoFavs).map((g) => g.name), ['Azul', 'Café Bonito!', 'Arcs'], 'several favourites: A to Z among themselves, ahead of the rest');
+  assert.deepEqual(matchMine(toggleFav(list, voteKey(azul)), '').map((g) => g.name), ['Azul', 'Arcs', 'Café Bonito!'], 'an empty search lists favourites first');
+  assert.deepEqual(matchMine([...marked, { id: 1, name: 'Star Realms', fav: true }], 'ar').map((g) => g.name), ['Arcs', 'Star Realms'], 'a name that starts with the search still beats a favourite');
+  assert.equal(withGame([], { ...azul, fav: true })[0].fav, true, 'a game can be added already marked');
 
   const full = Array.from({ length: MAX_MY_GAMES }, (_, i) => ({ id: i + 1, name: `Game ${i + 1}`, year: 0 }));
   assert.equal(withGame(full, azul), null, 'the list has a limit');
