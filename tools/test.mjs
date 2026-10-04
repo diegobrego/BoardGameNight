@@ -12,6 +12,7 @@ import { MAX_MY_GAMES, hasGame, withGame, withoutGame, toggleFav, ordered, match
 import { voteKey } from '../js/games.js';
 import { toPlain, buildBackup, backupName, withoutUndefined, buildPlay, parseBackup, restoreOps, cutoffFor, oldDayKeys } from '../js/admin.js';
 import { buildCatalog, ownedKeys, nobodyOwns, sortCatalog, withoutGameFrom, sharedDoc } from '../js/collection.js';
+import { buildSpecialDay, specialMap, splitSpecialDays, bavarianHolidays, holidaysBetween, NOTE_MAX, AHEAD_DAYS } from '../js/special.js';
 
 const encoder = new TextEncoder();
 const root = new URL('..', import.meta.url);
@@ -132,6 +133,7 @@ const root = new URL('..', import.meta.url);
 
   // every file the install step caches has to exist, or the whole install fails
   const shell = vm.runInContext('SHELL', sandbox);
+  const cacheName = vm.runInContext('CACHE', sandbox);
   for (const entry of shell) {
     const file = entry === './' ? 'index.html' : entry;
     assert.ok(existsSync(new URL(file, root)), `cached file exists: ${entry}`);
@@ -145,13 +147,13 @@ const root = new URL('..', import.meta.url);
 
   // install: caches the shell and takes over straight away
   await run('install', {});
-  assert.equal(stores.get('bgn-shell-v2').size, shell.length, 'the whole shell is cached on install');
+  assert.equal(stores.get(cacheName).size, shell.length, 'the whole shell is cached on install');
   assert.ok(sandbox.skipped, 'a new version takes over without waiting');
 
   // activate: old caches are cleaned up
   stores.set('bgn-shell-v1', new Map());
   await run('activate', {});
-  assert.deepEqual([...stores.keys()], ['bgn-shell-v2'], 'old caches are deleted');
+  assert.deepEqual([...stores.keys()], [cacheName], 'old caches are deleted');
   assert.ok(sandbox.claimed, 'open pages are taken over');
 
   // fetch, online: the fresh network copy wins, and is saved for later
@@ -160,7 +162,7 @@ const root = new URL('..', import.meta.url);
   assert.equal(online1.body, 'fresh', 'network first: new versions show up straight away');
   assert.equal(sandbox.lastInit?.cache, 'no-cache', "it asks the server, not the browser's 10-minute HTTP cache");
   await new Promise((r) => setTimeout(r, 0));
-  assert.equal(stores.get('bgn-shell-v2').get(absolute(page.url)).body, 'fresh', 'the fresh copy is saved (replacing the install-time one)');
+  assert.equal(stores.get(cacheName).get(absolute(page.url)).body, 'fresh', 'the fresh copy is saved (replacing the install-time one)');
 
   // fetch, offline: falls back to the saved copy, ignoring ?demo-style query strings
   online = false;
@@ -375,7 +377,7 @@ const root = new URL('..', import.meta.url);
 
   const now = new Date(Date.UTC(2026, 9, 4, 18, 30));
   const backup = buildBackup({ players: { p1: { name: 'Mia' } }, days: { '2026-10-05': {}, '2026-10-06': {} }, plays: [{ id: 'a' }], campaigns: [] }, now);
-  assert.deepEqual(backup.counts, { players: 1, days: 2, plays: 1, campaigns: 0, sharedGames: 0 });
+  assert.deepEqual(backup.counts, { players: 1, days: 2, plays: 1, campaigns: 0, sharedGames: 0, specialDays: 0 });
   assert.equal(backup.exportedAt, '2026-10-04T18:30:00.000Z');
   assert.equal(backup.app, 'board-game-night');
   assert.deepEqual(Object.keys(backup).filter((k) => ['admins', 'adminRequests'].includes(k)), [], 'admin accounts are not in a backup');
@@ -416,22 +418,25 @@ const root = new URL('..', import.meta.url);
     plays: [{ id: 'play1', date: '2026-10-01', game: { id: 13, name: 'Catan', year: 1995 }, winner: 'p1', players: ['p1', 'p2'], names: { p1: 'Mia', p2: 'Leo' } }],
     campaigns: [{ id: 'c1', title: 'Arcs', game: { id: 359871, name: 'Arcs' }, players: ['p1'], status: 'active' }],
     sharedGames: [{ id: 'g999', gameId: 999, name: 'Unlisted', year: 2020, source: 'played' }],
+    specialDays: [{ id: '2026-12-25', note: 'Christmas Day' }],
   };
   const text = JSON.stringify(buildBackup(data, now));
   const parsed = parseBackup(text);
   assert.ok(parsed.backup, 'a backup the site made reads back');
-  assert.deepEqual(parsed.summary.counts, { players: 2, days: 1, plays: 1, campaigns: 1, sharedGames: 1 });
+  assert.deepEqual(parsed.summary.counts, { players: 2, days: 1, plays: 1, campaigns: 1, sharedGames: 1, specialDays: 1 });
   assert.equal(parsed.summary.exportedAt, '2026-10-04T18:30:00.000Z');
 
   // the writes: id kept as the document name, not repeated inside it
   const ops = restoreOps(parsed.backup);
-  assert.deepEqual(ops.map((o) => `${o.col}/${o.id}`), ['players/p1', 'players/p2', 'days/2026-10-05', 'campaigns/c1', 'plays/play1', 'sharedGames/g999']);
+  assert.deepEqual(ops.map((o) => `${o.col}/${o.id}`), ['players/p1', 'players/p2', 'days/2026-10-05', 'campaigns/c1', 'plays/play1', 'sharedGames/g999', 'specialDays/2026-12-25']);
   assert.equal('id' in ops.find((o) => o.col === 'plays').data, false, 'the id is the document name, not a field');
   assert.equal(ops.find((o) => o.col === 'sharedGames').data.gameId, 999, 'the game id inside a shared game stays');
+  assert.deepEqual(ops.find((o) => o.col === 'specialDays').data, { note: 'Christmas Day' }, 'a special day is written as its note, the date is its name');
 
-  // an older backup without shared games still restores
-  const older = JSON.parse(text); delete older.sharedGames;
+  // an older backup without shared games or special days still restores
+  const older = JSON.parse(text); delete older.sharedGames; delete older.specialDays;
   assert.equal(parseBackup(JSON.stringify(older)).summary.counts.sharedGames, 0);
+  assert.equal(parseBackup(JSON.stringify(older)).summary.counts.specialDays, 0);
 
   // things that are not, or not quite, a backup
   assert.match(parseBackup('not json').error, /isn't a backup/);
@@ -442,6 +447,9 @@ const root = new URL('..', import.meta.url);
   assert.match(parseBackup(JSON.stringify({ ...older, plays: [{ id: 'x' }] })).error, /logged games/);
   assert.match(parseBackup(JSON.stringify({ ...older, campaigns: [{ id: 'x' }] })).error, /campaigns/);
   assert.match(parseBackup(JSON.stringify({ ...older, plays: {} })).error, /damaged/);
+  assert.match(parseBackup(JSON.stringify({ ...older, specialDays: [{ id: 'xmas', note: 'Christmas' }] })).error, /special days/, 'a special day needs a date');
+  assert.match(parseBackup(JSON.stringify({ ...older, specialDays: [{ id: '2026-12-25', note: '' }] })).error, /special days/, 'and a note');
+  assert.match(parseBackup(JSON.stringify({ ...older, specialDays: [{ id: '2026-12-25', note: 'x'.repeat(NOTE_MAX + 1) }] })).error, /special days/, 'and a note the database accepts');
 
   // tidying old days
   assert.equal(cutoffFor('2026-10-04', 30), '2026-09-04');
@@ -490,4 +498,52 @@ const root = new URL('..', import.meta.url);
   assert.deepEqual(withoutGameFrom(players, 'g1'), [], 'nothing to change if nobody has it');
   assert.deepEqual(sharedDoc({ id: 999, name: 'Unlisted', year: 2020 }), { gameId: 999, name: 'Unlisted', year: 2020, source: 'played' });
   console.log('ok  game collection');
+}
+
+// ---- special days: a note on a day (holidays, game releases) -----------------------------
+{
+  const opts = { today: '2026-10-04', last: '2029-10-08' };
+  assert.deepEqual(buildSpecialDay({ date: '2026-12-25', note: '  Christmas   Day ' }, opts), { date: '2026-12-25', note: 'Christmas Day' }, 'the note is tidied up');
+  assert.deepEqual(buildSpecialDay({ date: '2026-10-04', note: 'Today' }, opts), { date: '2026-10-04', note: 'Today' }, 'today counts');
+  const err = (form, extra = {}) => buildSpecialDay(form, { ...opts, ...extra }).error;
+  assert.match(err({ date: '', note: 'x' }), /Choose the day/);
+  assert.match(err({ date: '2026-02-30', note: 'x' }), /Choose the day/, 'a date that does not exist');
+  assert.match(err({ date: '2026-10-03', note: 'x' }), /already passed/, 'not in the past...');
+  assert.equal(err({ date: '2026-10-03', note: 'x' }, { editing: true }), undefined, '...unless an existing one is being changed');
+  assert.match(err({ date: '2030-01-01', note: 'x' }), /too far ahead/);
+  assert.match(err({ date: '2026-12-25', note: '   ' }), /note/, 'the note is needed');
+  assert.match(err({ date: '2026-12-25', note: 'x'.repeat(NOTE_MAX + 1) }), /too long|a bit long/);
+  assert.equal(err({ date: '2026-12-25', note: 'x'.repeat(NOTE_MAX) }), undefined, 'exactly the longest note is fine');
+  assert.equal(cutoffFor('2026-10-04', -AHEAD_DAYS), '2029-10-08', 'the limit the form uses is about three years ahead');
+
+  const rows = [{ date: '2026-12-25', note: 'Christmas' }, { date: '2026-10-01', note: 'Old' }, { date: '2026-10-04', note: 'Today' }, { date: '2026-09-01', note: 'Older' }, { date: '2027-01-01', note: 'New Year' }];
+  assert.deepEqual(specialMap(rows)['2026-12-25'], 'Christmas');
+  assert.deepEqual(specialMap([]), {});
+  const { upcoming, past } = splitSpecialDays(rows, '2026-10-04');
+  assert.deepEqual(upcoming.map((r) => r.date), ['2026-10-04', '2026-12-25', '2027-01-01'], 'today and later, soonest first');
+  assert.deepEqual(past.map((r) => r.date), ['2026-10-01', '2026-09-01'], 'earlier days, latest first');
+
+  // the Bavarian public holidays: Easter and the days counted from it, checked against known years
+  const dates = (year) => Object.fromEntries(bavarianHolidays(year).map((h) => [h.note, h.date]));
+  assert.equal(bavarianHolidays(2026).length, 13, 'thirteen a year');
+  assert.deepEqual(dates(2026), {
+    Neujahr: '2026-01-01', 'Heilige Drei Könige': '2026-01-06', Karfreitag: '2026-04-03', Ostermontag: '2026-04-06', 'Tag der Arbeit': '2026-05-01',
+    'Christi Himmelfahrt': '2026-05-14', Pfingstmontag: '2026-05-25', Fronleichnam: '2026-06-04', 'Mariä Himmelfahrt': '2026-08-15',
+    'Tag der Deutschen Einheit': '2026-10-03', Allerheiligen: '2026-11-01', '1. Weihnachtstag': '2026-12-25', '2. Weihnachtstag': '2026-12-26',
+  }, '2026: Easter is 5 April');
+  assert.deepEqual([dates(2025).Karfreitag, dates(2025).Pfingstmontag, dates(2025).Fronleichnam], ['2025-04-18', '2025-06-09', '2025-06-19'], '2025: Easter is 20 April');
+  assert.deepEqual([dates(2027).Karfreitag, dates(2027).Ostermontag, dates(2027)['Christi Himmelfahrt']], ['2027-03-26', '2027-03-29', '2027-05-06'], '2027: Easter is 28 March');
+  assert.equal(dates(2028).Ostermontag, '2028-04-17', '2028: a leap year, Easter is 16 April');
+  assert.equal(dates(2038).Ostermontag, '2038-04-26', '2038: a very late Easter, 25 April');
+  assert.ok(bavarianHolidays(2026).every((h, i, all) => i === 0 || all[i - 1].date < h.date), 'in date order');
+  assert.ok(bavarianHolidays(2026).every((h) => buildSpecialDay(h, { today: '2026-01-01' }).date === h.date), 'each one is a valid special day (a real date, a note that fits)');
+
+  const next = holidaysBetween('2026-10-04', '2029-10-08');
+  assert.equal(next[0].date, '2026-11-01', 'starts after today (the 3rd of October has gone by)');
+  assert.deepEqual(next.slice(0, 3).map((h) => h.note), ['Allerheiligen', '1. Weihnachtstag', '2. Weihnachtstag']);
+  assert.equal(next.length, 3 + 13 + 13 + 10, 'the rest of 2026, two whole years, and 2029 up to the limit');
+  assert.equal(next[next.length - 1].date, '2029-10-03');
+  assert.equal(holidaysBetween('2026-12-25', '2026-12-25').length, 1, 'both ends are included');
+  assert.deepEqual(holidaysBetween('2026-12-27', '2027-01-05').map((h) => h.date), ['2027-01-01']);
+  console.log('ok  special days');
 }

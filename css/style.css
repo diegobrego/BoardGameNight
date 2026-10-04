@@ -354,6 +354,26 @@ a.btn { text-decoration: none; }
   border: var(--bw) solid currentColor; border-radius: 7px;
 }
 
+/* A special day (an admin's note: a public holiday, a game's release...): thin diagonal lines, and the note as a
+   small banner. On the phone it is a strip along the top of the row. */
+.day.is-special {
+  flex-wrap: wrap; row-gap: 8px;
+  background-image: repeating-linear-gradient(135deg, transparent 0 7px, rgba(26, 16, 51, .32) 7px 8px);
+  background-size: auto;
+}
+:root[data-theme="dark"] .day.is-special { background-image: repeating-linear-gradient(135deg, transparent 0 7px, rgba(167, 139, 250, .42) 7px 8px); }
+.day.is-special.is-mine,
+:root[data-theme="dark"] .day.is-special.is-mine { background-image: repeating-linear-gradient(135deg, transparent 0 7px, rgba(255, 255, 255, .34) 7px 8px); }
+.day-note {
+  order: -1; flex: 0 0 100%; box-sizing: border-box; min-width: 0;
+  display: flex; align-items: flex-start; gap: 5px;
+  padding: 2px 8px 2px 6px; border-radius: 6px;
+  background: var(--ink); color: var(--paper);
+  font-size: 12px; font-weight: 800; letter-spacing: .02em; line-height: 1.25; text-align: left;
+}
+.day-note .ico { flex: none; width: 13px; height: 13px; margin-top: 1px; }
+.day-note span { min-width: 0; overflow-wrap: anywhere; }
+
 .legend {
   display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 14px;
   font-size: 14px;
@@ -363,6 +383,7 @@ a.btn { text-decoration: none; }
 .swatch--mine { background: var(--solid); }
 .swatch--go { border-color: var(--go); box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px var(--go); margin: 2px 4px 2px 2px; }
 .swatch--weekend { background-image: var(--dots-light); background-size: 4px 4px; }
+.swatch--special { background-image: repeating-linear-gradient(135deg, transparent 0 3px, var(--line) 3px 4px); }
 
 /* Small phones: a little less padding so each day row has room to breathe. */
 @media (max-width: 759px) {
@@ -384,7 +405,10 @@ a.btn { text-decoration: none; }
     flex-direction: column; align-items: stretch; gap: 8px;
     min-height: 168px; padding: 10px;
   }
-  .day-date { justify-items: start; }
+  .day-date { justify-items: start; order: -1; }
+  .day.is-special { flex-wrap: nowrap; }
+  /* under the date, so the dates of a row stay lined up; edge to edge across the tile for more room */
+  .day-note { order: 0; flex: none; margin: 0 -7px; padding: 2px 7px; border-radius: 0; font-size: 11px; letter-spacing: 0; }
   .day-mid { justify-content: flex-start; }
   .day-people { flex: 1; align-content: flex-start; }
   .day-status { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; }
@@ -1113,3 +1137,12 @@ textarea::placeholder { color: var(--ink); opacity: .5; }
 .icon-btn--danger { background: #fee2e2; color: #b91c1c; border-color: #b91c1c; }
 :root[data-theme="dark"] .icon-btn--danger { background: #3b1219; color: #fca5a5; border-color: #f87171; }
 @media (hover: hover) { .icon-btn--danger:hover { background: #b91c1c; color: #ffffff; } }
+
+/* a special day in a day's panel: its note, and (for an admin) the buttons to change it */
+.special-note {
+  display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 6px 10px;
+  background: var(--ink); color: var(--paper); border-radius: 8px; font-weight: 700;
+}
+.special-note .ico { flex: none; margin-top: 2px; }
+#dp-special .actions { margin-top: 8px; }
+.special-note + .actions { margin-top: 8px; }

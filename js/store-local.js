@@ -115,12 +115,19 @@ function seed() {
   ];
   // a game that was played although nobody had it in a collection, and a few messages for the admin
   const sharedGames = [{ key: 'n_homebrew_quest', gameId: null, name: 'Homebrew Quest', year: 0, source: 'played', createdAt: Date.now() - 3 * 86400000 }];
+  // days an admin marked with a note: one inside the calendar's two weeks (on a game night), one a bit later, one far ahead
+  const inDays = (n) => { const t = new Date(); return dateKey(new Date(t.getFullYear(), t.getMonth(), t.getDate() + n)); };
+  const specialDays = [
+    { date: keys[1], note: 'Release: Arcs expansion' },
+    { date: inDays(9), note: 'Public holiday' },
+    { date: inDays(75), note: 'Winter break' },
+  ];
   const feedback = [
     { id: 'fb1', message: 'Could the calendar show the time of each game night?', name: 'Zoe', by: 'demo2', createdAt: Date.now() - 2 * 86400000, seen: false },
     { id: 'fb2', message: 'Love the campaigns tab!', name: '', by: '', createdAt: Date.now() - 6 * 86400000, seen: true },
   ];
   campaigns[0].notes = 'Chapter 1: the empire sets out. Mia plays the red empire, Leo the blue one.\nHouse rule: reach cards are shuffled back in each chapter.';
-  return { players, days, plays, campaigns, sharedGames, feedback };
+  return { players, days, plays, campaigns, sharedGames, specialDays, feedback };
 }
 
 function load() {
@@ -131,6 +138,7 @@ function load() {
       saved.plays ??= [];
       saved.campaigns ??= [];
       saved.sharedGames ??= [];
+      saved.specialDays ??= [];
       saved.feedback ??= [];
       return saved;
     }
@@ -144,12 +152,14 @@ export function create() {
   const playListeners = new Set();
   const campaignListeners = new Set();
   const sharedListeners = new Set();
+  const specialListeners = new Set();
   const feedbackListeners = new Set();
   const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* private mode */ } };
   const emit = () => listeners.forEach((fn) => fn({ players: state.players, days: state.days, synced: true }));
   const emitPlays = () => playListeners.forEach((fn) => fn([...state.plays]));
   const emitCampaigns = () => campaignListeners.forEach((fn) => fn([...state.campaigns]));
   const emitShared = () => sharedListeners.forEach((fn) => fn(state.sharedGames.map((g) => ({ ...g }))));
+  const emitSpecial = () => specialListeners.forEach((fn) => fn(state.specialDays.map((s) => ({ ...s }))));
   const feedbackRows = () => state.feedback.map((f) => ({ ...f })).sort((a, b) => b.createdAt - a.createdAt);   // newest first, like the shared site
   const emitFeedback = () => feedbackListeners.forEach((fn) => fn(feedbackRows()));
   const toMs = (v) => (typeof v === 'string' ? Date.parse(v) || 0 : v ?? 0);   // backups from the shared site hold dates as text
@@ -157,7 +167,7 @@ export function create() {
 
   // Keep several open tabs of the demo in step.
   window.addEventListener('storage', (e) => {
-    if (e.key === KEY) { state = load(); emit(); emitPlays(); emitCampaigns(); emitShared(); emitFeedback(); }
+    if (e.key === KEY) { state = load(); emit(); emitPlays(); emitCampaigns(); emitShared(); emitSpecial(); emitFeedback(); }
   });
 
   const day = (date) => (state.days[date] ??= { players: [], games: [] });
@@ -284,6 +294,7 @@ export function create() {
         plays: state.plays,
         campaigns: state.campaigns,
         sharedGames: state.sharedGames.map(({ key, ...rest }) => ({ id: key, ...rest })),
+        specialDays: state.specialDays.map(({ date, note }) => ({ id: date, note })),
       }));
     },
 
@@ -328,6 +339,29 @@ export function create() {
       persist(); emit(); emitShared();
     },
 
+    // Special days: a day with a note (a holiday, a game's release...).
+    subscribeSpecialDays(fn) {
+      specialListeners.add(fn);
+      queueMicrotask(() => fn(state.specialDays.map((s) => ({ ...s }))));
+      return () => specialListeners.delete(fn);
+    },
+
+    async setSpecialDays(rows) {
+      for (const { date, note } of rows) {
+        const i = state.specialDays.findIndex((s) => s.date === date);
+        if (i >= 0) state.specialDays[i] = { date, note };
+        else state.specialDays.push({ date, note });
+      }
+      persist(); emitSpecial();
+    },
+
+    setSpecialDay(date, note) { return this.setSpecialDays([{ date, note }]); },
+
+    async deleteSpecialDay(date) {
+      state.specialDays = state.specialDays.filter((s) => s.date !== date);
+      persist(); emitSpecial();
+    },
+
     // Feedback from the "Send feedback" link. Only the Admin page reads it.
     subscribeFeedback(fn) {
       feedbackListeners.add(fn);
@@ -369,9 +403,10 @@ export function create() {
         else if (col === 'campaigns') upsert(state.campaigns, { ...data, id, createdAt: toMs(data.createdAt) }, (x) => x.id);
         else if (col === 'plays') upsert(state.plays, { ...data, id, createdAt: toMs(data.createdAt) }, (x) => x.id);
         else if (col === 'sharedGames') upsert(state.sharedGames, { ...data, key: id, createdAt: toMs(data.createdAt) }, (x) => x.key);
+        else if (col === 'specialDays') upsert(state.specialDays, { date: id, note: data.note ?? '' }, (x) => x.date);
         onProgress?.(i + 1, ops.length);
       });
-      persist(); emit(); emitPlays(); emitCampaigns(); emitShared();
+      persist(); emit(); emitPlays(); emitCampaigns(); emitShared(); emitSpecial();
     },
 
     // `people` is [{ id, name }]

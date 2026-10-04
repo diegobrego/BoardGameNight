@@ -14,6 +14,7 @@
 //   sharedGames/{key}   a game that was played although nobody had it in a collection (the key is
 //                       the game's voteKey); the group's collection is the players' collections plus these
 //                       { gameId, name, year, source: 'played' }
+//   specialDays/{YYYY-MM-DD}  a day an admin marked with a note (a holiday, a game's release...): { note }
 //   feedback/{id}       a message from "Send feedback": { message, name, by, createdAt, seen? }; only admins read
 //   admins/{uid}        created by hand in the Firebase console; makes that Google
 //                       account an admin (see firestore.rules and the README)
@@ -41,6 +42,7 @@ export function create(config) {
   const playsCol = collection(db, 'plays');
   const campaignsCol = collection(db, 'campaigns');
   const sharedCol = collection(db, 'sharedGames');
+  const specialCol = collection(db, 'specialDays');
   const feedbackCol = collection(db, 'feedback');
 
   return {
@@ -158,9 +160,9 @@ export function create(config) {
     // no special permission; only the Admin page offers it.) Admin accounts are not included.
     async exportAll() {
       const read = async (col) => (await getDocs(col)).docs.map((d) => ({ id: d.id, ...toPlain(d.data()) }));
-      const [players, days, plays, campaigns, sharedGames] = await Promise.all([read(playersCol), read(daysCol), read(playsCol), read(campaignsCol), read(sharedCol)]);
+      const [players, days, plays, campaigns, sharedGames, specialDays] = await Promise.all([read(playersCol), read(daysCol), read(playsCol), read(campaignsCol), read(sharedCol), read(specialCol)]);
       const byId = (rows) => Object.fromEntries(rows.map(({ id, ...rest }) => [id, rest]));
-      return { players: byId(players), days: byId(days), plays, campaigns, sharedGames };
+      return { players: byId(players), days: byId(days), plays, campaigns, sharedGames, specialDays };
     },
 
     // Campaigns: long games played over several sessions. A campaign's sessions are plays
@@ -237,6 +239,23 @@ export function create(config) {
       for (const { playerId, games } of updates) batch.update(doc(playersCol, playerId), { games });
       await batch.commit();
     },
+
+    // Special days: one document per day, named by its date. Everyone reads them (the calendar shows them);
+    // only an admin writes (the rules enforce it).
+    subscribeSpecialDays(onData, onError) {
+      return onSnapshot(specialCol, (snap) => {
+        onData(snap.docs.map((d) => ({ date: d.id, note: d.data().note ?? '' })));
+      }, onError);
+    },
+    setSpecialDay: (date, note) => setDoc(doc(specialCol, date), { note }),
+    async setSpecialDays(rows) {        // several at once (the Bavarian holidays), 400 to a batch
+      for (let i = 0; i < rows.length; i += 400) {
+        const batch = writeBatch(db);
+        for (const { date, note } of rows.slice(i, i + 400)) batch.set(doc(specialCol, date), { note });
+        await batch.commit();
+      }
+    },
+    deleteSpecialDay: (date) => deleteDoc(doc(specialCol, date)),
 
     // Feedback from the "Send feedback" link. Anyone can send; only an admin can read it.
     subscribeFeedback(onData, onError) {

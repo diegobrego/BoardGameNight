@@ -1,6 +1,8 @@
 // Helpers for the Admin page: the backup file, and turning the "edit a hall-of-fame entry" form
 // into a play. They only reshape data, so they can be tested on their own.
 
+import { NOTE_MAX } from './special.js';
+
 export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Firestore hands back timestamps as objects; a backup wants plain text. Turns those (anywhere
@@ -13,7 +15,7 @@ export function toPlain(value) {
 }
 
 // Everything the site stores, in one file. Admin accounts are left out on purpose.
-export function buildBackup({ players = {}, days = {}, plays = [], campaigns = [], sharedGames = [] }, now = new Date()) {
+export function buildBackup({ players = {}, days = {}, plays = [], campaigns = [], sharedGames = [], specialDays = [] }, now = new Date()) {
   return {
     app: 'board-game-night',
     format: 1,
@@ -24,12 +26,14 @@ export function buildBackup({ players = {}, days = {}, plays = [], campaigns = [
       plays: plays.length,
       campaigns: campaigns.length,
       sharedGames: sharedGames.length,
+      specialDays: specialDays.length,
     },
     players,
     days,
     plays,
     campaigns,
     sharedGames,
+    specialDays,
   };
 }
 
@@ -93,8 +97,9 @@ export function parseBackup(text) {
   const plays = data.plays ?? [];
   const campaigns = data.campaigns ?? [];
   const sharedGames = data.sharedGames ?? [];
+  const specialDays = data.specialDays ?? [];
   if (!isObject(players) || !isObject(days)) return { error: 'That backup is damaged (the players or days are not in the right shape).' };
-  if (![plays, campaigns, sharedGames].every(Array.isArray)) return { error: 'That backup is damaged (the games or campaigns are not in the right shape).' };
+  if (![plays, campaigns, sharedGames, specialDays].every(Array.isArray)) return { error: 'That backup is damaged (the games or campaigns are not in the right shape).' };
 
   for (const [id, p] of Object.entries(players)) {
     if (!id || !isObject(p) || typeof p.name !== 'string' || !p.name) return { error: `That backup is damaged: a player (${id}) has no name.` };
@@ -116,18 +121,24 @@ export function parseBackup(text) {
     if (!isObject(s) || typeof s.id !== 'string' || typeof s.name !== 'string') return { error: 'That backup is damaged: one of the shared games is incomplete.' };
   }
 
-  const backup = { players, days, plays, campaigns, sharedGames };
+  for (const s of specialDays) {
+    if (!isObject(s) || !DATE_RE.test(s.id ?? '') || typeof s.note !== 'string' || !s.note || s.note.length > NOTE_MAX) {
+      return { error: 'That backup is damaged: one of the special days is incomplete.' };
+    }
+  }
+
+  const backup = { players, days, plays, campaigns, sharedGames, specialDays };
   return {
     backup,
     summary: {
       exportedAt: typeof data.exportedAt === 'string' ? data.exportedAt : null,
-      counts: { players: Object.keys(players).length, days: Object.keys(days).length, plays: plays.length, campaigns: campaigns.length, sharedGames: sharedGames.length },
+      counts: { players: Object.keys(players).length, days: Object.keys(days).length, plays: plays.length, campaigns: campaigns.length, sharedGames: sharedGames.length, specialDays: specialDays.length },
     },
   };
 }
 
 // The writes that put a backup back: [{ col, id, data }]. Players first, then days, campaigns, logged
-// games and shared games. Entries are written under the id they had, so a restore overwrites those and
+// games, shared games and special days. Entries are written under the id they had, so a restore overwrites those and
 // deletes nothing.
 export function restoreOps(backup) {
   const ops = [];
@@ -136,6 +147,7 @@ export function restoreOps(backup) {
   for (const { id, ...data } of backup.campaigns ?? []) ops.push({ col: 'campaigns', id, data });
   for (const { id, ...data } of backup.plays ?? []) ops.push({ col: 'plays', id, data });
   for (const { id, ...data } of backup.sharedGames ?? []) ops.push({ col: 'sharedGames', id, data });
+  for (const { id, ...data } of backup.specialDays ?? []) ops.push({ col: 'specialDays', id, data });
   return ops;
 }
 

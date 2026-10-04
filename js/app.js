@@ -9,6 +9,7 @@ import { sessionsOf, plannedOn, campaignRecord, sortCampaigns, defaultTitle, can
 import { MAX_MY_GAMES, hasGame, withGame, withoutGame, toggleFav, ordered, matchMine } from './mygames.js';
 import { buildBackup, backupName, buildPlay, withoutUndefined, parseBackup, restoreOps, cutoffFor, oldDayKeys } from './admin.js';
 import { buildCatalog, ownedKeys, nobodyOwns, sortCatalog, withoutGameFrom } from './collection.js';
+import { buildSpecialDay, specialMap, splitSpecialDays, holidaysBetween, NOTE_MAX, AHEAD_DAYS } from './special.js';
 import {
   loadGames, isLoaded, findGame, searchGames, bggUrl, bggSearchUrl, parseBggLink, titleFromSlug, voteKey,
 } from './games.js';
@@ -120,6 +121,9 @@ const state = {
   sharedGames: [],           // games that were played though nobody had them listed (part of the group's collection)
   sharedReady: false,
   sharedError: false,        // that list couldn't be loaded (e.g. rules not updated yet)
+  specialDays: [],           // days an admin marked with a note (a holiday, a game's release...): [{ date, note }]
+  special: {},               // the same by date: { 'YYYY-MM-DD': note }
+  specialError: false,       // that list couldn't be loaded (e.g. rules not updated yet)
   feedback: [],              // messages from "Send feedback" (loaded for admins only)
   feedbackError: false,
   playersFilter: '',         // the Players page's search box
@@ -275,7 +279,8 @@ function renderStatic() {
   $('#legend').innerHTML = `
     <li><span class="swatch swatch--mine"></span>You're available</li>
     <li><span class="swatch swatch--go"></span>${MIN_PLAYERS}+ available: game on</li>
-    <li><span class="swatch swatch--weekend"></span>Weekend</li>`;
+    <li><span class="swatch swatch--weekend"></span>Weekend</li>
+    <li id="legend-special" hidden><span class="swatch swatch--special"></span>Special day</li>`;
 }
 
 const isSharedAdmin = () => state.store?.mode === 'firebase' && state.admin.isAdmin;
@@ -348,17 +353,19 @@ function dayTile(d) {
   const myCampaign = myCamps.length > 0;
   const othersPlanned = campaigns.length > myCamps.length;
   const logged = d.isPast && loggedDates().has(d.key);
+  const note = state.special[d.key] ?? '';                              // an admin's note on this day (a holiday, a release...)
   const cls = [
     'day', mine && 'is-mine', go && 'is-go', d.isWeekend && 'is-weekend', d.isPast && 'is-past',
-    d.isToday && 'is-today', changed && 'is-changed', !ids.length && 'is-empty',
+    d.isToday && 'is-today', changed && 'is-changed', !ids.length && 'is-empty', note && 'is-special',
   ].filter(Boolean).join(' ');
   const time = go ? (state.days[d.key]?.details?.time ?? '') : '';      // a game night with a start time shows it above the faces
-  const label = `${longLabel(d.date)}: ${plural(ids.length, 'player')} available${go ? (d.isPast ? ', was a game night' : ', game on') : ''}${mine ? ', including you' : ''}${campaigns.length ? `, campaign session: ${campaigns.map((c) => c.title).join(', ')}${myCampaign ? " (you're in it)" : ''}` : ''}${d.isPast && go ? (logged ? ', logged' : ', not logged yet') : ''}${time ? `, ${d.isPast ? 'was at' : 'starts at'} ${time}` : ''}`;
+  const label = `${longLabel(d.date)}: ${plural(ids.length, 'player')} available${go ? (d.isPast ? ', was a game night' : ', game on') : ''}${mine ? ', including you' : ''}${campaigns.length ? `, campaign session: ${campaigns.map((c) => c.title).join(', ')}${myCampaign ? " (you're in it)" : ''}` : ''}${d.isPast && go ? (logged ? ', logged' : ', not logged yet') : ''}${time ? `, ${d.isPast ? 'was at' : 'starts at'} ${time}` : ''}${note ? `, special day: ${note}` : ''}`;
   const faces = ids.map((id) => avatar(state.players[id].avatar, 22, state.players[id].name)).join('');
-  const sub =d.isToday ? 'Today' : d.num === 1 ? d.month : '';
+  const sub = d.isToday ? 'Today' : d.num === 1 ? d.month : '';
   return `
     <button type="button" class="${cls}" data-action="${d.isPast ? 'open-day' : 'day'}" data-date="${d.key}" aria-label="${esc(label)}"${picking ? ` aria-pressed="${mine}"` : ''}>
       ${myCampaign ? `<span class="day-badge" title="${esc(`Your campaign: ${myCamps.map((c) => c.title).join(', ')}`)}" aria-hidden="true">${icon('flag', 2)}</span>` : ''}
+      ${note ? `<span class="day-note" title="${esc(note)}">${icon('sparkle', 2)}<span>${esc(note)}</span></span>` : ''}
       <span class="day-date">
         <span class="day-dow">${d.dow}</span>
         <span class="day-num">${d.num}</span>
@@ -406,6 +413,7 @@ function renderCalendar() {
   const focused = el.contains(document.activeElement) ? document.activeElement.dataset.date : null;
   el.classList.toggle('is-picking', state.mode === 'pick');
   el.innerHTML = state.daysList.map(dayTile).join('');
+  $('#legend-special').hidden = ![...state.pastDays, ...state.daysList].some((d) => state.special[d.key] !== undefined);
   if (focused) $(`[data-date="${focused}"]`, el)?.focus({ preventScroll: true });
 }
 
@@ -748,6 +756,7 @@ function openDay(key) {
       <button type="button" class="icon-btn" data-action="close-dialog" aria-label="Close">${icon('x', 2)}</button>
     </div>
     <div class="sheet-body">
+      <section id="dp-special" class="block" hidden></section>
       <section id="dp-who" class="block"></section>
       <section id="dp-campaign" class="block"></section>
       <section id="dp-details" class="block"></section>
@@ -786,6 +795,17 @@ function renderDayPanel() {
   const lockedTitle = past ? 'This day has passed' : 'Only players who are available this day can do this';
 
   $('#dp-title').innerHTML = `${esc(longLabel(day.date))}${go ? `<span class="day-flag">${icon('star', 2)}<span>${past ? 'Was a game night' : 'Game on'}</span></span>` : ''}`;
+
+  // A special day (a holiday, a game's release): its note, and for an admin the buttons to change it.
+  const note = state.special[key];
+  const canMark = adminOn && (note !== undefined || !past);       // no point marking a day that has gone by
+  $('#dp-special').hidden = note === undefined && !canMark;
+  $('#dp-special').innerHTML = `
+    ${note !== undefined ? `<p class="special-note">${icon('sparkle', 2)}<span><strong>Special day:</strong> ${esc(note)}</span></p>` : ''}
+    ${canMark ? `<div class="actions">
+      <button type="button" class="btn btn--small" data-action="special-edit" data-date="${esc(key)}">${note !== undefined ? 'Edit the note' : `${icon('sparkle', 2)} Mark as special day`}</button>
+      ${note !== undefined ? `<button type="button" class="btn btn--small btn--danger" data-action="special-remove" data-date="${esc(key)}">${icon('x', 2)} Remove</button>` : ''}
+    </div>` : ''}`;
 
   $('#dp-who').innerHTML = `
     <h3 class="h-small">Who's available <span class="count">${ids.length}</span></h3>
@@ -2162,10 +2182,133 @@ function adminHall() {
     ${plays.length > ADMIN_PLAYS_SHOWN ? `<button type="button" class="btn btn--small" data-action="admin-plays-toggle">${state.adminAllPlays ? 'Show fewer' : `Show all ${plays.length}`}</button>` : ''}`;
 }
 
+// --- special days: a note on a day (a public holiday, a game's release...) ---
+
+function adminSpecialDays() {
+  if (state.specialError) return '<p class="muted">Special days can\'t be loaded right now. The site owner may need to publish the updated database rules from the README.</p>';
+  const { upcoming, past } = splitSpecialDays(state.specialDays, state.daysList[0].key);
+  const missing = missingHolidays().length;
+  const row = (s) => `
+    <li class="adm-row">
+      <div class="adm-main">
+        <strong>${esc(s.note)}</strong>
+        <span class="adm-sub">${esc(dateLabel(s.date))}</span>
+      </div>
+      <div class="adm-actions">
+        <button type="button" class="btn btn--small" data-action="special-edit" data-date="${esc(s.date)}">Edit</button>
+        <button type="button" class="btn btn--small btn--danger" data-action="special-remove" data-date="${esc(s.date)}">${icon('x', 2)} Remove</button>
+      </div>
+    </li>`;
+  return `
+    <p class="muted">Mark days that matter, like a public holiday or the release of a game. The note shows as a small banner on the day in the calendar, and the day gets thin diagonal lines. You can also do this from a day's panel.</p>
+    <div class="adm-tools">
+      <button type="button" class="btn btn--solid" data-action="special-add">${icon('plus', 2)} Add a special day</button>
+      ${missing ? `<button type="button" class="btn" data-action="special-holidays">${icon('calendar', 2)} Add Bavarian public holidays <span class="count">${missing}</span></button>` : ''}
+    </div>
+    <p class="muted">${missing
+    ? 'The Bavarian public holidays for the next three years can be added in one go. Days that already have a note are left alone.'
+    : 'All the Bavarian public holidays for the next three years are in the list.'} Mariä Himmelfahrt (15 August) is only a day off in most Bavarian towns, so remove it if yours is an exception.</p>
+    ${upcoming.length ? `<ul class="adm-list">${upcoming.map(row).join('')}</ul>` : '<p class="muted">No special days coming up.</p>'}
+    ${past.length ? `<h3 class="h-small adm-head">Already past <span class="count">${past.length}</span></h3><ul class="adm-list">${past.map(row).join('')}</ul>` : ''}`;
+}
+
+// The Bavarian public holidays from today to the furthest day a special day can be set, minus the days that
+// already have a note (those are never changed).
+const missingHolidays = () => {
+  const today = state.daysList[0].key;
+  return holidaysBetween(today, cutoffFor(today, -AHEAD_DAYS)).filter((h) => state.special[h.date] === undefined);
+};
+
+function addHolidays() {
+  if (!adminOn) return;
+  const rows = missingHolidays();
+  if (!rows.length) return toast('The Bavarian public holidays are all there already');
+  askConfirm({
+    title: 'Add the Bavarian public holidays?',
+    message: `${plural(rows.length, 'day')} get a note, from ${dateLabel(rows[0].date)} to ${dateLabel(rows[rows.length - 1].date)}. Days that already have a note stay as they are, and you can edit or remove any of them afterwards.`,
+    label: 'Add them',
+    failMessage: "Couldn't add them. If this keeps happening, the site owner may need to publish the updated database rules from the README.",
+  }, async () => {
+    await state.store.setSpecialDays(rows);
+    toast(`${plural(rows.length, 'holiday')} added`);
+  });
+}
+
+// The form to add a special day, or (with a date) to change that day's note. The date is fixed when the
+// day is already known: opened from its panel, or from its row in the list.
+function openSpecialEditor(key = null) {
+  if (!adminOn) return;
+  const today = state.daysList[0].key;
+  const existing = key ? state.special[key] : undefined;
+  openSheet(existing !== undefined ? 'Edit special day' : 'Add a special day', `
+    <form id="sp-form" class="adm-form" autocomplete="off">
+      <label class="field"><span>Day</span>
+        <input id="sp-date" type="date" required value="${esc(key ?? '')}"${key ? ' readonly' : ` min="${esc(today)}" max="${esc(cutoffFor(today, -AHEAD_DAYS))}"`}>
+      </label>
+      <p id="sp-hint" class="muted" hidden></p>
+      <label class="field"><span>Note, shown on the day</span>
+        <input id="sp-note" required maxlength="${NOTE_MAX}" placeholder="For example: Public holiday" value="${esc(existing ?? '')}">
+      </label>
+      <p id="sp-error" class="error" role="alert" hidden></p>
+      <div class="row">
+        <button type="button" class="btn" data-action="close-dialog">Cancel</button>
+        <button type="submit" class="btn btn--solid">Save</button>
+      </div>
+    </form>`);
+  $(key ? '#sp-note' : '#sp-date').focus();
+}
+
+// Picking a date that already has a note: say that saving replaces it.
+function updateSpecialHint() {
+  const hint = $('#sp-hint');
+  if (!hint) return;
+  const old = state.special[$('#sp-date').value];
+  hint.textContent = old !== undefined && !$('#sp-date').readOnly ? `This day already has a note: “${old}”. Saving replaces it.` : '';
+  hint.hidden = !hint.textContent;
+}
+
+async function submitSpecial(form) {
+  const error = $('#sp-error');
+  const today = state.daysList[0].key;
+  const date = $('#sp-date').value;
+  const built = buildSpecialDay(
+    { date, note: $('#sp-note').value },
+    { today, last: cutoffFor(today, -AHEAD_DAYS), editing: state.special[date] !== undefined },
+  );
+  if (built.error) {
+    error.textContent = built.error;
+    error.hidden = false;
+    return;
+  }
+  const submit = form.querySelector('[type="submit"]');
+  submit.disabled = true;
+  try {
+    await state.store.setSpecialDay(built.date, built.note);
+    $('#form-dialog').close();
+    toast('Special day saved');
+  } catch (err) {
+    submit.disabled = false;
+    fail(err, "Couldn't save the special day. If this keeps happening, the site owner may need to publish the updated database rules from the README.");
+  }
+}
+
+function removeSpecial(key) {
+  if (!adminOn || state.special[key] === undefined) return;
+  askConfirm({
+    title: 'Remove this special day?',
+    message: `“${state.special[key]}” comes off ${dateLabel(key)}.`,
+    label: 'Remove',
+    failMessage: "Couldn't remove the special day. Please try again.",
+  }, async () => {
+    await state.store.deleteSpecialDay(key);
+    toast('Special day removed');
+  });
+}
+
 function adminBackup() {
   return `
     <h3 class="h-small adm-head">Download</h3>
-    <p>One file with everything the site stores: the players (and their collections), every day, the hall of fame, the campaigns, and the games that were played without being in anyone's collection. Admin accounts and feedback aren't in it.</p>
+    <p>One file with everything the site stores: the players (and their collections), every day, the hall of fame, the campaigns, the games that were played without being in anyone's collection, and the special days. Admin accounts and feedback aren't in it.</p>
     <div class="adm-tools">
       <button type="button" class="btn btn--solid" data-action="admin-backup"${state.backupBusy ? ' disabled' : ''}>${icon('download', 2)} ${state.backupBusy ? 'Preparing…' : 'Download backup'}</button>
     </div>
@@ -2194,6 +2337,7 @@ function renderAdmin() {
     body: `<h3 class="h-small adm-head">All campaigns <span class="count">${state.campaigns.length}</span></h3>${adminCampaigns()}
       <h3 class="h-small adm-head">Games suggested for the next two weeks</h3>${adminUpcomingGames()}`,
   })}
+    ${fold('adm-special', 'Special days', { count: state.specialDays.length, body: adminSpecialDays() })}
     ${fold('adm-hall', 'Hall of fame', { count: state.plays.length, open: false, body: adminHall() })}
     ${fold('adm-feedback', 'Feedback', { count: unreadFeedback ? `${unreadFeedback} new` : state.feedback.length, open: unreadFeedback > 0, body: adminFeedback() })}
     ${fold('adm-tidy', 'Tidy old days', { open: false, body: adminTidy() })}
@@ -2231,7 +2375,7 @@ async function downloadBackup() {
     link.remove();
     setTimeout(() => URL.revokeObjectURL(link.href), 5000);
     const c = backup.counts;
-    state.backupNote = `Saved ${link.download}: ${plural(c.players, 'player')}, ${plural(c.days, 'day')}, ${plural(c.plays, 'logged game')}, ${plural(c.campaigns, 'campaign')}, ${plural(c.sharedGames, 'shared game')}.`;
+    state.backupNote = `Saved ${link.download}: ${plural(c.players, 'player')}, ${plural(c.days, 'day')}, ${plural(c.plays, 'logged game')}, ${plural(c.campaigns, 'campaign')}, ${plural(c.sharedGames, 'shared game')}, ${plural(c.specialDays, 'special day')}.`;
   } catch (err) {
     fail(err, "Couldn't make the backup. Please try again.");
   } finally {
@@ -2640,7 +2784,7 @@ function restorePreview(r) {
   const made = r.summary.exportedAt ? feedbackTime(Date.parse(r.summary.exportedAt)) : 'at an unknown time';
   return `
     <div class="adm-status" role="status">
-      <strong>${esc(r.name)}</strong><br>Made ${esc(made)}. It holds ${plural(c.players, 'player')}, ${plural(c.days, 'day')}, ${plural(c.plays, 'logged game')}, ${plural(c.campaigns, 'campaign')} and ${plural(c.sharedGames, 'shared game')}.
+      <strong>${esc(r.name)}</strong><br>Made ${esc(made)}. It holds ${plural(c.players, 'player')}, ${plural(c.days, 'day')}, ${plural(c.plays, 'logged game')}, ${plural(c.campaigns, 'campaign')}, ${plural(c.sharedGames, 'shared game')} and ${plural(c.specialDays, 'special day')}.
     </div>
     <p class="muted">Restoring adds all of that back and overwrites anything with the same name (a player, a day, a logged game, a campaign). It never deletes anything, but newer changes to those same entries are replaced by what the file says.</p>
     ${r.error ? `<p class="error" role="alert">${esc(r.error)}</p>` : ''}
@@ -3173,6 +3317,10 @@ const actions = {
   feedback: openFeedback,
   'campaign-notes': (el) => openNotes(el.dataset.id),
   'no-owner': (el) => toast(`Nobody has ${el.dataset.name} in their collection yet. If you own it, add it to yours in your profile.`),
+  'special-add': () => openSpecialEditor(null),
+  'special-edit': (el) => openSpecialEditor(el.dataset.date),
+  'special-remove': (el) => removeSpecial(el.dataset.date),
+  'special-holidays': addHolidays,
   'play-add': () => openPlayEditor(null),
   'play-edit': (el) => openPlayEditor(el.dataset.id),
   'ph-pick-game': (el) => {
@@ -3233,6 +3381,7 @@ document.addEventListener('change', (e) => {
   }
   if (e.target.id === 'log-next' && state.log) state.log.next = e.target.value;
   if (e.target.id === 'restore-file') chooseRestoreFile(e.target);
+  if (e.target.id === 'sp-date') updateSpecialHint();
 });
 
 document.addEventListener('submit', (e) => {
@@ -3243,6 +3392,7 @@ document.addEventListener('submit', (e) => {
   if (e.target.id === 'log-form') submitLog(e.target);
   if (e.target.id === 'campaign-form') submitStartCampaign(e.target);
   if (e.target.id === 'ph-form') submitPlayEdit(e.target);
+  if (e.target.id === 'sp-form') submitSpecial(e.target);
   if (e.target.id === 'notes-form') submitNotes(e.target);
   if (e.target.id === 'feedback-form') submitFeedback(e.target);
 });
@@ -3344,6 +3494,23 @@ function subscribe() {
       console.error(err);
       state.sharedError = true;
       renderAll();
+    },
+  );
+
+  // Days an admin marked with a note (holidays, releases): shown on the calendar. Its own listener too,
+  // so rules that haven't been updated yet only cost the notes, never the calendar.
+  state.unsubscribeSpecial?.();
+  state.unsubscribeSpecial = state.store.subscribeSpecialDays(
+    (rows) => {
+      state.specialDays = rows;
+      state.special = specialMap(rows);
+      state.specialError = false;
+      renderAll();
+    },
+    (err) => {
+      console.error(err);
+      state.specialError = true;
+      renderAdmin();
     },
   );
 }
