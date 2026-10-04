@@ -16,7 +16,11 @@
   --on-go: #06230f;         /* text on --go */
   --alert: #ff9f1c;         /* orange: the game-night reminder banner (same in both themes) */
   --on-alert: #2a1500;      /* text on --alert */
-  --face-bg: #f6f2ff;       /* avatar plates stay light in both themes */
+  /* Each player gets a pale tint built from their own hue (--h, set per player in JS).
+     --pill-* sits behind a name, --plate-* behind a pixel face; the plate stays light in
+     both themes so the dark sprite always reads. */
+  --pill-s: 90%; --pill-l: 91%;
+  --plate-s: 85%; --plate-l: 82%;
   --face-ink: #1a1033;
 
   --bw: 3px;                /* border width */
@@ -38,6 +42,7 @@
   --solid: #7c3aed;
   --on-solid: #ffffff;
   --go: #34d27b;
+  --pill-s: 32%; --pill-l: 24%;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -74,7 +79,7 @@ a { color: inherit; }
 }
 
 .ico { display: block; flex: none; }
-.day-flag .ico, .crew-del .ico, .lock .ico { width: 15px; height: 15px; }
+.day-flag .ico, .crew-del .ico, .icon-btn--small .ico { width: 15px; height: 15px; }
 .muted { opacity: .7; }
 
 /* ---------------------------------------------------------------- layout */
@@ -170,6 +175,7 @@ a.btn { text-decoration: none; }
   background: var(--paper); color: var(--ink);
   border: var(--bw) solid var(--line); border-radius: 9px;
 }
+.icon-btn--small { width: 28px; height: 28px; border-radius: 8px; }
 
 .theme-btn {
   display: grid; place-items: center; flex: none;
@@ -182,8 +188,8 @@ a.btn { text-decoration: none; }
 .chip {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 3px 14px 3px 3px;
-  background: var(--paper); color: var(--ink);
-  border: var(--bw) solid var(--paper); border-radius: 999px;
+  background: hsl(var(--h, 260) var(--pill-s) var(--pill-l)); color: var(--ink);
+  border: var(--bw) solid var(--paper); border-radius: 11px;
   font-weight: 700;
 }
 .chip-name { max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -200,9 +206,9 @@ a.btn { text-decoration: none; }
 .av {
   display: inline-block; flex: none;
   width: var(--s, 24px); height: var(--s, 24px);
-  padding: calc(var(--s, 24px) * .1);
-  background: var(--face-bg); color: var(--face-ink);
-  border: 2px solid var(--face-ink); border-radius: calc(var(--s, 24px) * .28);
+  padding: calc(var(--s, 24px) * .12);
+  background: hsl(var(--h, 260) var(--plate-s) var(--plate-l)); color: var(--face-ink);
+  border: 2px solid var(--face-ink); border-radius: calc(var(--s, 24px) * .18);   /* squarer, so the sprite's corners don't touch the curve */
 }
 .av svg { display: block; width: 100%; height: 100%; }
 
@@ -223,7 +229,7 @@ a.btn { text-decoration: none; }
 }
 .day.is-weekend { background-image: var(--dots-light); background-size: 4px 4px; }
 
-/* "I'm free" = solid purple */
+/* "I'm available" = solid purple */
 .day.is-mine { background: var(--solid); color: var(--on-solid); background-image: none; }
 
 /* enough players (MIN_PLAYERS) = green double ring (+ a "Game on" tag, so it isn't colour alone) */
@@ -305,8 +311,8 @@ a.btn { text-decoration: none; }
 .crew-item {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 3px 14px 3px 3px;
-  background: var(--paper);
-  border: var(--bw) solid var(--line); border-radius: 999px;
+  background: hsl(var(--h, 260) var(--pill-s) var(--pill-l));
+  border: var(--bw) solid var(--line); border-radius: 11px;
 }
 .crew-item em { font-style: normal; opacity: .6; }
 .crew-item.is-me { background: var(--solid); color: var(--on-solid); }
@@ -368,11 +374,15 @@ a.btn { text-decoration: none; }
 .block { display: grid; gap: 10px; }
 
 .people { display: flex; flex-wrap: wrap; gap: 8px; }
-.people li { display: inline-flex; align-items: center; gap: 8px; padding: 3px 12px 3px 3px; border: var(--bw) solid var(--line); border-radius: 999px; }
+.people li {
+  display: inline-flex; align-items: center; gap: 8px; padding: 3px 12px 3px 3px;
+  background: hsl(var(--h, 260) var(--pill-s) var(--pill-l));
+  border: var(--bw) solid var(--line); border-radius: 11px;
+}
 .people em { font-style: normal; opacity: .6; }
 .block > .btn { justify-self: start; }
 
-.lock { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: var(--bw) dashed var(--line); border-radius: 10px; }
+.head-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 
 .games { display: grid; gap: 8px; }
 .game {
@@ -397,6 +407,7 @@ a.btn { text-decoration: none; }
   font-weight: 800; line-height: 1.1;
 }
 .vote.is-on { background: var(--solid); color: var(--on-solid); }
+.vote.is-locked { opacity: .5; cursor: not-allowed; }   /* not available this day, so no vote */
 .top-pick {
   display: inline-flex; align-items: center; gap: 5px;
   padding: 0 8px 0 6px;
@@ -435,7 +446,7 @@ input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; d
 .person-btn {
   display: flex; align-items: center; gap: 12px; width: 100%; padding: 5px 12px 5px 5px;
   font-weight: 700; text-align: left;
-  background: var(--paper); color: var(--ink);
+  background: hsl(var(--h, 260) var(--pill-s) var(--pill-l)); color: var(--ink);
   border: var(--bw) solid var(--line); border-radius: 12px;
 }
 .person-btn.is-me { border-style: dashed; }
@@ -489,7 +500,7 @@ input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; d
   .result:hover, .person-btn:hover, .cand:hover { background: var(--solid); color: var(--on-solid); }
   .game-link:hover .game-name { text-decoration: underline; text-underline-offset: 3px; }
   .reminder .btn:hover:not(:disabled) { background: transparent; color: var(--on-alert); }
-  .vote:hover { background: var(--solid); color: var(--on-solid); }
+  .vote:not(.is-locked):hover { background: var(--solid); color: var(--on-solid); }
   .vote.is-on:hover { background: var(--paper); color: var(--ink); }
 
   /* day tiles: a dashed halo, so hover never looks like "selected" */

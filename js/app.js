@@ -1,6 +1,6 @@
 import { MIN_PLAYERS, MIN_PLAYERS_FOR_IDEAS, DAYS_AHEAD, SITE_URL } from './config.js';
 import { createStore, isForcedDemo } from './store.js';
-import { avatar, randomSeed } from './avatar.js';
+import { avatar, randomSeed, hueOf } from './avatar.js';
 import { icon, iconInner } from './icons.js';
 import { upcomingDays, longLabel, rangeLabel } from './dates.js';
 import {
@@ -82,11 +82,11 @@ const state = {
 const sortedPlayers = () => Object.values(state.players).sort((a, b) => a.name.localeCompare(b.name));
 const byName = (a, b) => state.players[a].name.localeCompare(state.players[b].name);
 
-// Who is saved as free on a day (ignores players that no longer exist).
+// Who is saved as available on a day (ignores players that no longer exist).
 const savedIds = (key) => (state.days[key]?.players ?? []).filter((id) => state.players[id]);
 const savedMine = (key) => !!state.me && savedIds(key).includes(state.me);
 
-// Who counts as free on a day, including my not-yet-saved picks while in pick mode.
+// Who counts as available on a day, including my not-yet-saved picks while in pick mode.
 function peopleOn(key) {
   let ids = savedIds(key);
   if (state.mode === 'pick' && state.me) {
@@ -100,13 +100,15 @@ function peopleOn(key) {
 
 const changeCount = () => state.daysList.filter((d) => state.draft.has(d.key) !== savedMine(d.key)).length;
 
-// A day's games, most votes first (ties keep the order they were added). Votes from
-// players who no longer exist are ignored.
+// A day's games, most votes first (ties keep the order they were added). Only votes from
+// players who are available that day count: a vote from someone who is no longer
+// available (or no longer exists) is ignored, and comes back if they become available again.
 function rankGames(key) {
   const games = state.days[key]?.games ?? [];
   const votes = state.days[key]?.votes ?? {};
+  const available = new Set(savedIds(key));
   const ranked = games
-    .map((g, i) => ({ g, i, voters: (votes[voteKey(g)] ?? []).filter((id) => state.players[id]).sort(byName) }))
+    .map((g, i) => ({ g, i, voters: (votes[voteKey(g)] ?? []).filter((id) => available.has(id)).sort(byName) }))
     .sort((a, b) => b.voters.length - a.voters.length || a.i - b.i);
   return { ranked, topVotes: ranked[0]?.voters.length ?? 0 };
 }
@@ -137,7 +139,7 @@ function whatsappText(kind, day) {
   const pick = topPickLine(day.key);
   const lines = kind === 'remind'
     ? [`⏰ Game night ${day.isToday ? 'today' : 'tomorrow'}! (${when})`, `In: ${listNames(ids, 99)}`]
-    : [`🎲 Game night on ${when}?`, `Free so far: ${listNames(ids, 99)}`];
+    : [`🎲 Game night on ${when}?`, `Available so far: ${listNames(ids, 99)}`];
   if (pick) lines.push(pick);
   lines.push(kind === 'remind' ? `Details and votes: ${SITE_URL}` : `Pick your days and vote: ${SITE_URL}`);
   return lines.join('\n');
@@ -178,8 +180,8 @@ function renderStatic() {
   const favicon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" rx="5" fill="#6d28d9"/><g color="#fff" transform="translate(2.4 2.4) scale(.8)">${iconInner('meeple')}</g></svg>`;
   $('#favicon').href = `data:image/svg+xml,${encodeURIComponent(favicon)}`;
   $('#legend').innerHTML = `
-    <li><span class="swatch swatch--mine"></span>You're free</li>
-    <li><span class="swatch swatch--go"></span>${MIN_PLAYERS}+ free: game on</li>
+    <li><span class="swatch swatch--mine"></span>You're available</li>
+    <li><span class="swatch swatch--go"></span>${MIN_PLAYERS}+ available: game on</li>
     <li><span class="swatch swatch--weekend"></span>Weekend</li>`;
 }
 
@@ -189,7 +191,7 @@ function renderHeader() {
   const me = state.players[state.me];
   const adminTag = isSharedAdmin() ? '<span class="tag">Admin</span>' : '';
   $('#me-slot').innerHTML = adminTag + (me
-    ? `<button type="button" class="chip" data-action="profile" aria-label="Your profile: ${esc(me.name)}">${avatar(me.avatar, 28)}<span class="chip-name">${esc(me.name)}</span></button>`
+    ? `<button type="button" class="chip" style="--h:${hueOf(me.avatar)}" data-action="profile" aria-label="Your profile: ${esc(me.name)}">${avatar(me.avatar, 28)}<span class="chip-name">${esc(me.name)}</span></button>`
     : state.ready
       ? `<button type="button" class="chip" data-action="who">${icon('plus', 2)}<span class="chip-name">Join</span></button>`
       : '');
@@ -243,7 +245,7 @@ function dayTile(d) {
     'day', mine && 'is-mine', go && 'is-go', d.isWeekend && 'is-weekend',
     d.isToday && 'is-today', changed && 'is-changed', !ids.length && 'is-empty',
   ].filter(Boolean).join(' ');
-  const label = `${longLabel(d.date)}: ${plural(ids.length, 'player')} free${go ? ', game on' : ''}${mine ? ', including you' : ''}`;
+  const label = `${longLabel(d.date)}: ${plural(ids.length, 'player')} available${go ? ', game on' : ''}${mine ? ', including you' : ''}`;
   const faces = ids.map((id) => avatar(state.players[id].avatar, 22, state.players[id].name)).join('');
   const sub = d.isToday ? 'Today' : d.num === 1 ? d.month : '';
   return `
@@ -255,7 +257,7 @@ function dayTile(d) {
       </span>
       <span class="day-people">${faces}</span>
       <span class="day-status">
-        <span class="day-count">${ids.length} free</span>
+        <span class="day-count">${ids.length} available</span>
         ${go ? `<span class="day-flag">${icon('star', 2)}<span>Game on</span></span>` : ''}
         ${picking ? `<span class="day-check">${mine ? icon('check', 2) : ''}</span>` : ''}
       </span>
@@ -286,7 +288,7 @@ function renderCrew() {
     ${admin && list.length ? '<p class="muted crew-hint">Admin: tap the X to remove someone from the crew and from all their days.</p>' : ''}
     ${list.length
     ? `<ul class="crew-list">${list.map((p) => `
-        <li class="crew-item${p.id === state.me ? ' is-me' : ''}">${avatar(p.avatar, 28)}<span>${esc(p.name)}${p.id === state.me ? ' <em>(you)</em>' : ''}</span>${
+        <li class="crew-item${p.id === state.me ? ' is-me' : ''}" style="--h:${hueOf(p.avatar)}">${avatar(p.avatar, 28)}<span>${esc(p.name)}${p.id === state.me ? ' <em>(you)</em>' : ''}</span>${
   admin ? `<button type="button" class="crew-del" data-action="delete-player" data-id="${esc(p.id)}" aria-label="Remove ${esc(p.name)}">${icon('x', 2)}</button>` : ''}</li>`).join('')}</ul>`
     : '<p class="muted">Nobody has joined yet. Be the first!</p>'}`;
 }
@@ -300,7 +302,7 @@ function whatsappButton(day, extraClass = '') {
   return `<a class="btn ${extraClass}" href="${esc(link)}" target="_blank" rel="noopener noreferrer" title="Opens WhatsApp with a ready-made message">${soon ? 'Remind the group' : 'Tell the group'} ${icon('arrow', 2)}</a>`;
 }
 
-// The orange banner: shown to everyone when today or tomorrow has enough players free.
+// The orange banner: shown to everyone when today or tomorrow has enough players available.
 function renderReminder() {
   const el = $('#reminder');
   const soon = state.ready
@@ -315,7 +317,7 @@ function renderReminder() {
         <span class="reminder-icon">${icon('bell', 3)}</span>
         <p class="reminder-text">
           <strong>Game night ${d.isToday ? 'today' : 'tomorrow'}!</strong>
-          ${esc(longLabel(d.date))}. ${esc(listNames(ids))} ${ids.length === 1 ? 'is' : 'are'} free${savedMine(d.key) ? " (you're in)" : ''}.${pick ? ` ${esc(pick)}.` : ''}
+          ${esc(longLabel(d.date))}. ${esc(listNames(ids))} ${ids.length === 1 ? 'is' : 'are'} available${savedMine(d.key) ? " (you're in)" : ''}.${pick ? ` ${esc(pick)}.` : ''}
         </p>
         <span class="reminder-actions">
           <button type="button" class="btn btn--small" data-action="open-day" data-date="${d.key}">See the day</button>
@@ -376,7 +378,7 @@ async function savePick() {
 }
 
 // ---------------------------------------------------------------------------
-// day panel (who's free + game options)
+// day panel (who's available + game options)
 // ---------------------------------------------------------------------------
 
 function openDay(key) {
@@ -420,19 +422,21 @@ function renderDayPanel() {
   $('#dp-title').innerHTML = `${esc(longLabel(day.date))}${go ? `<span class="day-flag">${icon('star', 2)}<span>Game on</span></span>` : ''}`;
 
   $('#dp-who').innerHTML = `
-    <h3 class="h-small">Who's free <span class="count">${ids.length}</span></h3>
+    <h3 class="h-small">Who's available <span class="count">${ids.length}</span></h3>
     ${ids.length
-    ? `<ul class="people">${ids.map((id) => `<li>${avatar(state.players[id].avatar, 32)}<span>${esc(state.players[id].name)}${id === state.me ? ' <em>(you)</em>' : ''}</span></li>`).join('')}</ul>`
+    ? `<ul class="people">${ids.map((id) => `<li style="--h:${hueOf(state.players[id].avatar)}">${avatar(state.players[id].avatar, 32)}<span>${esc(state.players[id].name)}${id === state.me ? ' <em>(you)</em>' : ''}</span></li>`).join('')}</ul>`
     : '<p class="muted">Nobody yet.</p>'}
-    <button type="button" class="btn${mine ? '' : ' btn--solid'}" data-action="toggle-me">${mine ? "I can't make it" : "I'm free this day"}</button>
+    <button type="button" class="btn${mine ? '' : ' btn--solid'}" data-action="toggle-me">${mine ? "I can't make it" : "I'm available this day"}</button>
     ${state.admin.isAdmin && go ? whatsappButton(day) : ''}`;
 
+  // The rules of the game ("how many players make a game night", who can vote) live behind
+  // the ? button instead of taking up room here all the time.
   $('#dp-games-head').innerHTML = `
-    <h3 class="h-small">Game options <span class="count">${games.length}</span></h3>
-    ${!canSuggest
-    ? `<p class="lock">${icon('star', 2)} Game ideas unlock when ${MIN_PLAYERS_FOR_IDEAS} or more players are free (${ids.length}/${MIN_PLAYERS_FOR_IDEAS}).</p>`
-    : go ? ''
-      : `<p class="lock">It's a game night once ${MIN_PLAYERS} players are free (${ids.length}/${MIN_PLAYERS}). Add ideas now, and others can join if they like them.</p>`}`;
+    <div class="head-row">
+      <h3 class="h-small">Game options <span class="count">${games.length}</span></h3>
+      <button type="button" class="icon-btn icon-btn--small" data-action="game-night-info" aria-label="How game nights work" title="How game nights work">${icon('help', 2)}</button>
+    </div>
+    ${canSuggest ? '' : '<p class="muted">Ideas open up once someone is available.</p>'}`;
 
   const { ranked, topVotes } = rankGames(key);
 
@@ -444,7 +448,7 @@ function renderDayPanel() {
       const top = ranked.length > 1 && topVotes > 0 && voters.length === topVotes;
       return `
         <li class="game${top ? ' is-top' : ''}">
-          <button type="button" class="vote${voted ? ' is-on' : ''}" data-action="vote" data-gk="${esc(k)}" aria-pressed="${voted}"
+          <button type="button" class="vote${voted ? ' is-on' : ''}${mine ? '' : ' is-locked'}" data-action="vote" data-gk="${esc(k)}" aria-pressed="${voted}"${mine ? '' : ' aria-disabled="true" title="Only players who are available this day can vote"'}
             aria-label="${voted ? 'Take back your vote for' : 'Vote for'} ${esc(g.name)} (${plural(voters.length, 'vote')} so far)">
             ${icon('up', 2)}<span>${voters.length}</span>
           </button>
@@ -566,6 +570,11 @@ async function removeGame(el) {
 async function vote(el) {
   if (!state.me) return openWho('choose');
   const key = state.openKey;
+  // Votes decide who plays, so only players who are available that day can cast one.
+  if (!savedMine(key)) {
+    toast('Mark yourself available this day to vote.');
+    return;
+  }
   const gk = el.dataset.gk;
   const alreadyVoted = (state.days[key]?.votes?.[gk] ?? []).includes(state.me);
   try {
@@ -575,9 +584,36 @@ async function vote(el) {
   }
 }
 
+// A small "?" popup, so explanations don't have to sit on the page all the time.
+function openInfo(title, html) {
+  $('#info-dialog').innerHTML = `
+    <div class="sheet-head">
+      <h2>${esc(title)}</h2>
+      <button type="button" class="icon-btn" data-action="close-dialog" aria-label="Close">${icon('x', 2)}</button>
+    </div>
+    <div class="sheet-body">
+      ${html}
+      <div class="row"><button type="button" class="btn btn--solid" data-action="close-dialog">Got it</button></div>
+    </div>`;
+  $('#info-dialog').showModal();
+}
+
+function explainGameNight() {
+  const here = savedIds(state.openKey).length;
+  openInfo('How game nights work', `
+    <p><strong>A game night</strong> happens once <strong>${plural(MIN_PLAYERS, 'player')}</strong> are available on a day. This day: ${here} of ${MIN_PLAYERS}.</p>
+    <p><strong>Game ideas</strong> can be added from <strong>${plural(MIN_PLAYERS_FOR_IDEAS, 'available player')}</strong>, so you can float one early and others can join if they like it.</p>
+    <p>Only players who are <strong>available</strong> on the day can vote, so the votes come from the people who would actually play.</p>`);
+}
+
 // ---------------------------------------------------------------------------
 // who are you? (pick a name, join, edit profile)
 // ---------------------------------------------------------------------------
+
+// Hues already taken by other players' faces, so new faces get a clearly different tint.
+const takenHues = (exceptId) => Object.values(state.players)
+  .filter((p) => p.id !== exceptId)
+  .map((p) => hueOf(p.avatar));
 
 function setMe(id) {
   state.me = id;
@@ -589,9 +625,10 @@ function openWho(mode) {
   const list = sortedPlayers();
   if (mode === 'choose' && !list.length) mode = 'create';
   const keep = mode === 'edit' ? [Number(state.players[state.me]?.avatar) >>> 0] : [];
+  const taken = takenHues(mode === 'edit' ? state.me : null);
   state.who = {
     mode,
-    cands: [...keep, ...Array.from({ length: 8 - keep.length }, randomSeed)],
+    cands: [...keep, ...Array.from({ length: 8 - keep.length }, () => randomSeed(taken))],
     sel: 0,
   };
   renderWho();
@@ -612,7 +649,7 @@ function renderWho() {
           <h3 class="h-small">Already in the crew?</h3>
           <p class="muted">Tap your own name. Don't tap someone else's: that lets you change their days and profile.</p>
           <ul class="pick-list">${list.map((p) => `
-            <li><button type="button" class="person-btn${p.id === state.me ? ' is-me' : ''}" data-action="pick-player" data-id="${esc(p.id)}">${avatar(p.avatar, 36)}<span>${esc(p.name)}</span></button></li>`).join('')}</ul>
+            <li><button type="button" class="person-btn${p.id === state.me ? ' is-me' : ''}" style="--h:${hueOf(p.avatar)}" data-action="pick-player" data-id="${esc(p.id)}">${avatar(p.avatar, 36)}<span>${esc(p.name)}</span></button></li>`).join('')}</ul>
         </section>
       </div>`;
     return;
@@ -649,7 +686,8 @@ function renderCands() {
 
 function rerollFaces() {
   const keep = state.who.mode === 'edit' ? [state.who.cands[0]] : [];
-  state.who.cands = [...keep, ...Array.from({ length: 8 - keep.length }, randomSeed)];
+  const taken = takenHues(state.who.mode === 'edit' ? state.me : null);
+  state.who.cands = [...keep, ...Array.from({ length: 8 - keep.length }, () => randomSeed(taken))];
   state.who.sel = 0;
   renderCands();
 }
@@ -823,6 +861,7 @@ const actions = {
   'save-pick': savePick,
   day: (el) => (state.mode === 'pick' ? toggleDraft(el.dataset.date) : openDay(el.dataset.date)),
   'open-day': (el) => openDay(el.dataset.date),
+  'game-night-info': explainGameNight,
   'toggle-me': toggleMe,
   'adder-open': openAdder,
   'adder-close': closeAdder,

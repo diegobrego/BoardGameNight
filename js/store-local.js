@@ -1,7 +1,7 @@
 // DEMO backend: everything lives in this browser's localStorage. Handy for trying
 // the site out; nothing is shared with anyone. Seeds a few fake players on first run.
 
-import { randomSeed } from './avatar.js';
+import { randomSeed, hueOf } from './avatar.js';
 import { upcomingDays } from './dates.js';
 import { voteKey } from './games.js';
 
@@ -10,7 +10,12 @@ const KEY = 'bgn.demo.v1';
 function seed() {
   const names = ['Mia', 'Leo', 'Zoe', 'Sam'];
   const players = {};
-  names.forEach((name, i) => { players[`demo${i}`] = { id: `demo${i}`, name, avatar: randomSeed() }; });
+  const taken = [];   // pale tints already used, so the demo players look clearly different
+  names.forEach((name, i) => {
+    const avatar = randomSeed(taken);
+    taken.push(hueOf(avatar));
+    players[`demo${i}`] = { id: `demo${i}`, name, avatar };
+  });
   const keys = upcomingDays(7).map((d) => d.key);
   const days = {
     // tomorrow: enough players, so the reminder banner shows

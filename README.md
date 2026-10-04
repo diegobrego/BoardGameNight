@@ -1,6 +1,6 @@
 # Board Game Night
 
-A tiny website for a board game group. Everyone picks the days they're free over the next two weeks, days with 3+ free players light up green as a game night, and anyone can already float game ideas (with links to BoardGameGeek) once a single person is free.
+A tiny website for a board game group. Everyone picks the days they're available over the next two weeks, days with 3+ available players light up green as a game night, and anyone can already float game ideas (with links to BoardGameGeek) once a single person is available.
 
 Plain HTML/CSS/JS, no build step, hosted for free on GitHub Pages. Look: a Playdate feel (dither patterns, hard shadows, pixel-art player faces) in purple, with a rounded easy-to-read font and crisp vector icons. There's a **light and a dark theme**: it follows the device by default, and the sun/moon button in the header switches it (and remembers the choice). Green is reserved for "game on" days.
 
@@ -61,12 +61,12 @@ In admin mode you get an **Admin** tag and an **X** next to everyone in "The cre
 
 - **First visit:** pick your name from the list, or add yourself (type a name, choose a pixel face). Your device remembers you; tap your name in the top corner to edit your profile or switch player.
 - **Pick my days:** tap every day you can play, then **Save**. Green days update live as you tick them.
-- **Game ideas:** tap any day with at least one free player (`MIN_PLAYERS_FOR_IDEAS`) to see who's in and add game ideas with the **+** button. Games link to their BoardGameGeek page. Posting an idea early lets others decide to join if they like it.
-- **Green days** (3+ free players, set by `MIN_PLAYERS`) are marked with a green double border and a **Game on** tag: that's a game night.
+- **Game ideas:** tap any day with at least one available player (`MIN_PLAYERS_FOR_IDEAS`) to see who's in and add game ideas with the **+** button. Games link to their BoardGameGeek page. Posting an idea early lets others decide to join if they like it. The **?** next to "Game options" explains how game nights work.
+- **Green days** (3+ available players, set by `MIN_PLAYERS`) are marked with a green double border and a **Game on** tag: that's a game night.
 - **Reminder banner:** when today or tomorrow is a game night, an orange banner at the top of the site says so for everyone.
 - **WhatsApp (admin only):** the signed-in admin sees a **Remind the group** button on that banner, and a **Remind the group** / **Tell the group** button on a game night's day panel. It opens WhatsApp with a ready-made message (who's in, the top-voted game, and a link to the site); the admin picks the group and taps send. Nothing is sent automatically, and WhatsApp doesn't allow a website to post into an existing group by itself. Keeping the buttons admin-only just keeps them off everyone else's screen, since anyone could write the same message by hand.
 
-- **Voting:** every game on a day has an up-arrow button. Tap it for each game you'd be happy to play (tap again to take the vote back; you can vote for several). The list sorts by votes, shows who voted, and the leader gets a **Top pick** tag. Removing a game removes its votes.
+- **Voting:** every game on a day has an up-arrow button. Tap it for each game you'd be happy to play (tap again to take the vote back; you can vote for several). Only players who are available that day can vote, and a vote only counts while its voter is still available. The list sorts by votes, shows who voted, and the leader gets a **Top pick** tag. Removing a game removes its votes.
 
 ## Things to know
 

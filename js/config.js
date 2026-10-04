@@ -15,13 +15,13 @@ export const firebaseConfig = {
   appId: "1:85012025970:web:e0f5d1c1818607402728eb",
 };
 
-// How many free players it takes for a day to be "game on": the green marking, the
-// "Game on" tag and the orange reminder banner.
+// How many available players it takes for a day to be "game on": the green marking,
+// the "Game on" tag and the orange reminder banner.
 export const MIN_PLAYERS = 3;
 
-// How many free players it takes before people can add and vote on game ideas for a
-// day. Lower than MIN_PLAYERS, so ideas can start early and others can join if they
-// like what they see.
+// How many available players it takes before people can add game ideas for a day.
+// Lower than MIN_PLAYERS, so ideas can start early and others can join if they like
+// what they see. (Only players who are available that day can vote.)
 export const MIN_PLAYERS_FOR_IDEAS = 1;
 
 // How many days the calendar shows, starting today.
