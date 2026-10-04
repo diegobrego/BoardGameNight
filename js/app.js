@@ -311,7 +311,10 @@ function dayTile(d) {
   const mine = !!state.me && ids.includes(state.me);
   const changed = picking && state.draft.has(d.key) !== savedMine(d.key);
   const campaigns = plannedOn(state.campaigns, d.key);
-  const myCampaign = !!state.me && campaigns.some((c) => c.players.includes(state.me));   // a session of a campaign I'm in
+  // a session of a campaign I'm in gets a round flag badge on the corner of the day; other campaigns a small tag
+  const myCamps = state.me ? campaigns.filter((c) => c.players.includes(state.me)) : [];
+  const myCampaign = myCamps.length > 0;
+  const othersPlanned = campaigns.length > myCamps.length;
   const logged = d.isPast && loggedDates().has(d.key);
   const cls = [
     'day', mine && 'is-mine', go && 'is-go', d.isWeekend && 'is-weekend', d.isPast && 'is-past',
@@ -322,6 +325,7 @@ function dayTile(d) {
   const sub = d.isToday ? 'Today' : d.num === 1 ? d.month : '';
   return `
     <button type="button" class="${cls}" data-action="${d.isPast ? 'open-day' : 'day'}" data-date="${d.key}" aria-label="${esc(label)}"${picking ? ` aria-pressed="${mine}"` : ''}>
+      ${myCampaign ? `<span class="day-badge" title="${esc(`Your campaign: ${myCamps.map((c) => c.title).join(', ')}`)}" aria-hidden="true">${icon('flag', 2)}</span>` : ''}
       <span class="day-date">
         <span class="day-dow">${d.dow}</span>
         <span class="day-num">${d.num}</span>
@@ -332,7 +336,7 @@ function dayTile(d) {
         <span class="day-count">${ids.length} available</span>
         ${go && !d.isPast ? `<span class="day-flag">${icon('star', 2)}<span>Game on</span></span>` : ''}
         ${d.isPast && go ? `<span class="day-log ${logged ? 'is-done' : 'is-todo'}">${icon(logged ? 'check' : 'trophy', 2)}<span>${logged ? 'Logged' : 'Not logged'}</span></span>` : ''}
-        ${campaigns.length ? `<span class="day-campaign${myCampaign ? ' is-mine' : ''}">${icon('flag', 2)}<span>${myCampaign ? 'Your campaign' : 'Campaign'}</span></span>` : ''}
+        ${othersPlanned ? `<span class="day-campaign">${icon('flag', 2)}<span>Campaign</span></span>` : ''}
         ${picking ? `<span class="day-check">${mine ? icon('check', 2) : ''}</span>` : ''}
       </span>
     </button>`;
