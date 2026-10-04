@@ -696,6 +696,7 @@ function openDay(key) {
       <section id="dp-details" class="block"></section>
       <section id="dp-games" class="block">
         <div id="dp-games-head"></div>
+        <div id="dp-preview"></div>
         <ul id="dp-list" class="games"></ul>
         <div id="dp-add">
           <button type="button" id="dp-add-open" class="btn btn--solid btn--wide" data-action="adder-open">${icon('plus', 2)} Add a game</button>
@@ -800,26 +801,17 @@ function renderDayPanel() {
       </div>` : ''}
     ${dayButtons ? `<div class="actions">${dayButtons}</div>` : ''}`;
 
-  // The rules of the game ("how many players make a game night", who can vote) live behind
-  // the ? button instead of taking up room here all the time.
-  $('#dp-games-head').innerHTML = `
-    <div class="head-row">
-      <h3 class="h-small">Game options <span class="count">${games.length}</span></h3>
-      <button type="button" class="icon-btn icon-btn--small" data-action="game-night-info" aria-label="How game nights work" title="How game nights work">${icon('help', 2)}</button>
-    </div>
-    ${canSuggest || past ? '' : '<p class="muted">Ideas open up once someone is available.</p>'}`;
-
   const { ranked, topVotes } = rankGames(key);
 
-  $('#dp-list').innerHTML = ranked.length
-    ? ranked.map(({ g, voters, bringers }) => {
-      const by = state.players[g.by];
-      const k = voteKey(g);
-      const voted = !!state.me && voters.includes(state.me);
-      const bringing = !!state.me && bringers.includes(state.me);
-      const top = ranked.length > 1 && topVotes > 0 && voters.length === topVotes;
-      const locked = canAct ? '' : ` aria-disabled="true" title="${lockedTitle}"`;
-      return `
+  // One game on the list. They come most-voted first (rankGames sorts them that way).
+  const row = ({ g, voters, bringers }) => {
+    const by = state.players[g.by];
+    const k = voteKey(g);
+    const voted = !!state.me && voters.includes(state.me);
+    const bringing = !!state.me && bringers.includes(state.me);
+    const top = ranked.length > 1 && topVotes > 0 && voters.length === topVotes;
+    const locked = canAct ? '' : ` aria-disabled="true" title="${lockedTitle}"`;
+    return `
         <li class="game${top ? ' is-top' : ''}">
           <button type="button" class="vote${voted ? ' is-on' : ''}${canAct ? '' : ' is-locked'}" data-action="vote" data-gk="${esc(k)}" aria-pressed="${voted}"${locked}
             aria-label="${voted ? 'Take back your vote for' : 'Vote for'} ${esc(g.name)} (${plural(voters.length, 'vote')} so far)">
@@ -842,7 +834,31 @@ function renderDayPanel() {
           </div>
           ${(g.by === state.me && !past) || state.admin.isAdmin ? `<button type="button" class="icon-btn" data-action="remove-game" data-gk="${esc(k)}" aria-label="Remove ${esc(g.name)}">${icon('x', 2)}</button>` : ''}
         </li>`;
-    }).join('')
+  };
+
+  // Game options fold like the other lists (remembered on this device). A short list starts open,
+  // a long one closed. Closed, the most-voted game stays on show, with a note about the rest.
+  // The rules of the game ("how many players make a game night", who can vote) live behind the ?
+  // button instead of taking up room here all the time.
+  const foldable = games.length > 0;
+  const startOpen = games.length <= 3;
+  const open = isOpen('dp-games', startOpen);
+  $('#dp-games-head').innerHTML = `
+    <div class="head-row">
+      ${foldable
+    ? `<button type="button" class="fold-head" data-action="toggle-fold" data-fold="dp-games" data-default="${startOpen ? 1 : 0}" aria-expanded="${open}" aria-controls="dp-list"><span class="h-small">Game options <span class="count">${games.length}</span></span>${icon('chevron', 2)}</button>`
+    : `<h3 class="h-small">Game options <span class="count">0</span></h3>`}
+      <button type="button" class="icon-btn icon-btn--small" data-action="game-night-info" aria-label="How game nights work" title="How game nights work">${icon('help', 2)}</button>
+    </div>
+    ${canSuggest || past ? '' : '<p class="muted">Ideas open up once someone is available.</p>'}`;
+
+  $('#dp-preview').innerHTML = foldable && !open
+    ? `<div class="fold-preview"><ul class="games">${row(ranked[0])}</ul>${ranked.length > 1
+      ? `<p class="muted fold-note">+${ranked.length - 1} more. Tap "Game options" to see them all.</p>` : ''}</div>`
+    : '';
+  $('#dp-list').hidden = foldable && !open;
+  $('#dp-list').innerHTML = ranked.length
+    ? ranked.map(row).join('')
     : canSuggest && !past ? '<li class="muted">No games yet. Add the first one!</li>' : '';
 
   $('#dp-add').hidden = !canSuggest || past;
@@ -931,6 +947,8 @@ async function addGame(game) {
     return;
   }
   closeAdder();
+  state.folds['dp-games'] = true;                         // open the list, so the new game is on show
+  ls.set(FOLDS_KEY, JSON.stringify(state.folds));
   try {
     await state.store.addGame(key, { ...game, by: state.me });
     toast(`Added ${game.name}`);

@@ -471,6 +471,8 @@ a.btn { text-decoration: none; }
 .block > .btn { justify-self: start; }
 
 .head-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.head-row .fold-head { flex: 1; width: auto; }
+.head-row .fold-head[aria-expanded="false"] > .ico { transform: rotate(-90deg); }
 
 .games { display: grid; gap: 8px; }
 .game {
