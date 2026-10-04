@@ -2,11 +2,12 @@
 //
 //   subscribe(onData, { from, to }, onError) -> unsubscribe
 //       onData({ players, days, synced }) fires on every change.
-//         players: { [id]: { id, name, avatar } }
+//         players: { [id]: { id, name, avatar, games?: [{ id, name, year }] } }
 //         days:    { [YYYY-MM-DD]: { players: [id], games: [{ id, name, year, by }] } }
 //         synced:  false while the data may only be a local cache
 //   addPlayer({ name, avatar })          -> id
 //   updatePlayer(id, { name, avatar })
+//   setPlayerGames(id, [{ id, name, year }])    the player's favourite / owned games, saved as a whole
 //   setAvailability(playerId, addDates, removeDates)
 //   addGame(date, game) / removeGame(date, game)   (removing a game also drops its votes)
 //   toggleVote(date, voteKey, playerId, on)         days[date].votes: { [voteKey]: [playerId] }
@@ -24,7 +25,7 @@
 //   subscribeCampaigns(onData(campaigns[]), onError) -> unsubscribe
 //       campaign: { id, title, game, players: [id], names, status: 'active'|'finished', locked,
 //                   startedAt, next, finishedAt, winner, createdBy, createdAt }
-//   createCampaign(campaign) -> id    updateCampaign(id, patch)    deleteCampaign(id)  (admin only)
+//   createCampaign(campaign) -> id    updateCampaign(id, patch)    deleteCampaign(id)
 //   addCampaignPlayers(id, [{ id, name }])    removeCampaignPlayer(id, playerId)
 //
 // Admin tools:

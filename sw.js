@@ -28,6 +28,7 @@ const SHELL = [
   'js/hall.js',
   'js/icons.js',
   'js/ics.js',
+  'js/mygames.js',
   'icons/icon-192.png',
 ];
 

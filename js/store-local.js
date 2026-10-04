@@ -16,6 +16,13 @@ function seed() {
     taken.push(hueOf(avatar));
     players[`demo${i}`] = { id: `demo${i}`, name, avatar };
   });
+  // Mia already has a few favourites on her profile
+  players.demo0.games = [
+    { id: 13, name: 'Catan', year: 1995 },
+    { id: 230802, name: 'Azul', year: 2017 },
+    { id: 266192, name: 'Wingspan', year: 2019 },
+    { id: 359871, name: 'Arcs', year: 2024 },
+  ];
   const keys = upcomingDays(7).map((d) => d.key);
   const days = {
     // tomorrow: enough players, so the reminder banner shows
@@ -160,6 +167,11 @@ export function create() {
 
     async updatePlayer(id, patch) {
       Object.assign(state.players[id], patch);
+      persist(); emit();
+    },
+
+    async setPlayerGames(id, games) {
+      state.players[id].games = games;
       persist(); emit();
     },
 

@@ -32,8 +32,9 @@ export const isMember = (c, playerId) => !!playerId && !!c.players?.includes(pla
 export const isCreator = (c, playerId) => !!playerId && c.createdBy === playerId;
 
 // What a player may do with a campaign. `admin` is a signed-in admin: they can run any campaign
-// (lock it, add people, finish it, reopen it), which also rescues one whose creator has since
-// left. A finished campaign is closed to everyone except that: only the creator can reopen it.
+// (lock it, add people, finish it, reopen it, remove it), which also rescues one whose creator
+// has since left. A finished campaign is closed to everyone except that: only the creator can
+// reopen it. Only the creator can remove a campaign, running or finished.
 export function can(c, playerId, { admin = false } = {}) {
   const running = isRunning(c);
   const member = isMember(c, playerId);
@@ -45,6 +46,7 @@ export function can(c, playerId, { admin = false } = {}) {
     plan: running && member,
     manage: running && creator,   // lock or unlock it, add people, finish it
     reopen: !running && creator,  // take a finished campaign back to the running list
+    remove: creator,              // delete it (its sessions stay in the hall of fame)
   };
 }
 

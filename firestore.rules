@@ -27,11 +27,15 @@ service cloud.firestore {
 
     match /players/{playerId} {
       allow read: if true;
-      allow create, update: if request.resource.data.keys().hasOnly(['name', 'avatar', 'createdAt'])
+      // `games` is the player's list of favourite / owned games (at most 60: keep in step
+      // with MAX_MY_GAMES in js/mygames.js).
+      allow create, update: if request.resource.data.keys().hasOnly(['name', 'avatar', 'createdAt', 'games'])
                             && request.resource.data.name is string
                             && request.resource.data.name.size() > 0
                             && request.resource.data.name.size() <= 20
-                            && request.resource.data.avatar is number;
+                            && request.resource.data.avatar is number
+                            && request.resource.data.get('games', []) is list
+                            && request.resource.data.get('games', []).size() <= 60;
       allow delete: if isAdmin();
     }
 
@@ -124,7 +128,10 @@ service cloud.firestore {
                     && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'finishedAt', 'winner'])
                     && request.resource.data.finishedAt == ''
                     && request.resource.data.winner == null;
-      allow delete: if isAdmin();
+      // The site only offers "Remove" to the campaign's creator (and an admin), but like the
+      // other creator-only buttons that is the site's courtesy, not something these rules can
+      // check, so anyone could remove one by hand. Its sessions are `plays` entries and stay.
+      allow delete: if true;
     }
   }
 }

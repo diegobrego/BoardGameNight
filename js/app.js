@@ -6,6 +6,7 @@ import { upcomingDays, pastDays, longLabel, rangeLabel } from './dates.js';
 import { buildIcs } from './ics.js';
 import { tally, ranked as rankList, newestFirst, playerStats, awardTitles } from './hall.js';
 import { sessionsOf, plannedOn, campaignRecord, sortCampaigns, defaultTitle, can, outsiders } from './campaigns.js';
+import { MAX_MY_GAMES, hasGame, withGame, withoutGame, matchMine, byName as gamesByName } from './mygames.js';
 import {
   loadGames, isLoaded, findGame, searchGames, bggUrl, bggSearchUrl, parseBggLink, titleFromSlug, voteKey,
 } from './games.js';
@@ -614,6 +615,7 @@ function renderAll() {
   renderCampaigns();
   renderHall();
   renderDayPanel();
+  renderMyGames();
 }
 
 // ---------------------------------------------------------------------------
@@ -859,13 +861,16 @@ function closeAdder() {
   $('#game-results').innerHTML = '';
 }
 
-function resultButton(game, hint = '') {
-  return `<li><button type="button" class="result" data-action="add-game" data-id="${game.id ?? ''}" data-name="${esc(game.name)}" data-year="${game.year || ''}">
-    <span class="result-name">${esc(game.name)}</span>
+function resultButton(game, hint = '', mine = false) {
+  return `<li><button type="button" class="result${mine ? ' result--mine' : ''}" data-action="add-game" data-id="${game.id ?? ''}" data-name="${esc(game.name)}" data-year="${game.year || ''}">
+    ${mine ? icon('star', 2) : ''}<span class="result-name">${esc(game.name)}</span>
     <span class="result-meta">${hint || (game.year ? game.year : '')}</span>
     ${icon('plus', 2)}
   </button></li>`;
 }
+
+// My own list of favourite / owned games (kept on my profile).
+const myGames = () => state.players[state.me]?.games ?? [];
 
 function renderResults() {
   const input = $('#game-q');
@@ -874,15 +879,30 @@ function renderResults() {
   const out = [];
 
   const link = parseBggLink(raw);
+  // My games come first: all of them while nothing is typed, the matching ones once it is, and
+  // never one that's already on this day's list.
+  const onDay = state.days[state.openKey]?.games ?? [];
+  const mineHits = link ? [] : matchMine(myGames().filter((g) => !hasGame(onDay, g)), raw.length >= 2 ? raw : '');
+  if (mineHits.length) {
+    out.push(`<li class="results-head">${icon('star', 2)}<span>My games</span></li>`);
+    mineHits.forEach((g) => out.push(resultButton(g, '', true)));
+  }
+  if (!link && !raw && state.me) {
+    out.push(myGames().length
+      ? '<li><button type="button" class="link-btn" data-action="my-games">Edit my games</button></li>'
+      : '<li class="muted">Tip: save the games you own or love in your profile, and they\'ll show up here, so you never have to search for them.</li><li><button type="button" class="link-btn" data-action="my-games">Add my games</button></li>');
+  }
+
   if (link) {
     const known = findGame(link.id);
     const name = known?.name ?? (link.slug ? titleFromSlug(link.slug) : `BGG game #${link.id}`);
     out.push(resultButton({ id: link.id, name, year: known?.year ?? 0 }, 'from link'));
   } else if (raw.length >= 2) {
     if (isLoaded()) {
-      const hits = searchGames(raw);
+      if (mineHits.length) out.push('<li class="results-head"><span>Game list</span></li>');
+      const hits = searchGames(raw).filter((g) => !hasGame(mineHits, g));
       hits.forEach((g) => out.push(resultButton(g)));
-      if (!hits.length) out.push('<li class="muted">No match in the game list.</li>');
+      if (!hits.length && !mineHits.length) out.push('<li class="muted">No match in the game list.</li>');
     } else if (state.gamesFailed) {
       out.push("<li class=\"muted\">Couldn't load the game list. You can still add it by name.</li>");
     } else {
@@ -920,6 +940,113 @@ async function removeGame(el) {
     await state.store.removeGame(key, game);
   } catch (err) {
     fail(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// my games: a list of favourite / owned games on my profile, offered first when adding a game
+// ---------------------------------------------------------------------------
+
+function openMyGames() {
+  if (!state.me) return openWho('choose');
+  openSheet('My games', `
+    <p class="muted">Your favourites and the games you own. They show first when you add a game to a day, so you don't have to search every time.</p>
+    <div class="field">
+      <label class="sr-only" for="mg-q">Search for a game to add</label>
+      <input id="mg-q" type="search" placeholder="Search to add a game, or type a name" enterkeyhint="search" spellcheck="false">
+      <ul id="mg-results" class="results"></ul>
+    </div>
+    <section class="block">
+      <h3 class="h-small">My list <span id="mg-count" class="count"></span></h3>
+      <div id="mg-list"></div>
+    </section>
+    <div class="row"><button type="button" class="btn btn--solid" data-action="close-dialog">Done</button></div>`);
+  renderMyGames();
+  renderMyResults();
+  if (!isLoaded()) {
+    state.gamesFailed = false;
+    loadGames().then(renderMyResults).catch(() => { state.gamesFailed = true; renderMyResults(); });
+  }
+  $('#mg-q').focus();
+}
+
+// The list itself, with a remove button on each game. Also keeps the count in the profile in step.
+function renderMyGames() {
+  const games = gamesByName(myGames());
+  const profileCount = $('#who-games-count');
+  if (profileCount) profileCount.textContent = games.length;
+  const list = $('#mg-list');
+  if (!list) return;
+  $('#mg-count').textContent = `${games.length} / ${MAX_MY_GAMES}`;
+  list.innerHTML = games.length
+    ? `<ul class="mygames">${games.map((g) => `
+        <li>
+          <a class="game-link" href="${esc(g.id ? bggUrl(g.id) : bggSearchUrl(g.name))}" target="_blank" rel="noopener noreferrer">
+            <span class="game-name">${esc(g.name)}</span>${g.year ? `<span class="game-year">${g.year}</span>` : ''}${icon('arrow', 2)}
+            <span class="sr-only">(opens BoardGameGeek)</span>
+          </a>
+          <button type="button" class="icon-btn icon-btn--small" data-action="mg-remove" data-gk="${esc(voteKey(g))}" aria-label="Remove ${esc(g.name)} from my games">${icon('x', 2)}</button>
+        </li>`).join('')}</ul>`
+    : '<p class="muted">Nothing here yet. Search above and tap a game to add it.</p>';
+}
+
+function renderMyResults() {
+  const input = $('#mg-q');
+  if (!input) return;
+  const raw = input.value.trim();
+  const out = [];
+  const row = (g, hint = '') => (hasGame(myGames(), g)
+    ? `<li><span class="result is-on">${icon('check', 2)}<span class="result-name">${esc(g.name)}</span><span class="result-meta">on your list</span></span></li>`
+    : `<li><button type="button" class="result" data-action="mg-add" data-id="${g.id ?? ''}" data-name="${esc(g.name)}" data-year="${g.year || ''}">
+        <span class="result-name">${esc(g.name)}</span><span class="result-meta">${esc(hint || g.year || '')}</span>${icon('plus', 2)}
+      </button></li>`);
+  const link = parseBggLink(raw);
+  if (link) {
+    const known = findGame(link.id);
+    out.push(row({ id: link.id, name: known?.name ?? (link.slug ? titleFromSlug(link.slug) : `BGG game #${link.id}`), year: known?.year ?? 0 }, 'from link'));
+  } else if (raw.length >= 2) {
+    if (isLoaded()) {
+      const hits = searchGames(raw, 6);
+      hits.forEach((g) => out.push(row(g)));
+      if (!hits.length) out.push('<li class="muted">No match in the game list.</li>');
+    } else if (state.gamesFailed) {
+      out.push("<li class=\"muted\">Couldn't load the game list. You can still add it by name.</li>");
+    } else {
+      out.push('<li class="muted">Loading the game list…</li>');
+    }
+    out.push(row({ id: null, name: raw, year: 0 }, 'add by name'));
+  }
+  $('#mg-results').innerHTML = out.join('');
+}
+
+// Saves the whole list, and shows it straight away rather than waiting for the database to echo it back.
+async function saveMyGames(next) {
+  await state.store.setPlayerGames(state.me, next);
+  if (state.players[state.me]) state.players[state.me] = { ...state.players[state.me], games: next };
+  renderMyGames();
+}
+
+async function addMyGame(game) {
+  if (!state.me) return openWho('choose');
+  const next = withGame(myGames(), game);
+  if (!next) return toast(hasGame(myGames(), game) ? 'Already on your list' : `Your list is full (${MAX_MY_GAMES} games). Remove one first.`);
+  try {
+    await saveMyGames(next);
+    $('#mg-q').value = '';
+    renderMyResults();
+    toast(`Saved ${game.name}`);
+  } catch (err) {
+    fail(err, "Couldn't save that. If this keeps happening, the site owner may need to update the database rules.");
+  }
+}
+
+async function removeMyGame(key) {
+  if (!state.me) return;
+  try {
+    await saveMyGames(withoutGame(myGames(), key));
+    renderMyResults();
+  } catch (err) {
+    fail(err, "Couldn't remove that. Please try again.");
   }
 }
 
@@ -1332,7 +1459,7 @@ function campaignCard(c) {
       ${playButtons ? `<div class="actions">${playButtons}</div>` : ''}
       ${peopleButtons ? `<div class="actions">${peopleButtons}</div>` : ''}
       ${list.length ? fold(`sessions-${c.id}`, 'Sessions', { count: list.length, open: false, body: `<ul class="sessions">${list.join('')}</ul>` }) : ''}
-      ${state.admin.isAdmin ? `<button type="button" class="btn btn--small" data-action="campaign-delete" data-id="${esc(c.id)}">Remove campaign</button>` : ''}
+      ${rights.remove ? `<button type="button" class="btn btn--small" data-action="campaign-delete" data-id="${esc(c.id)}">Remove campaign</button>` : ''}
     </li>`;
 }
 
@@ -1655,14 +1782,17 @@ async function confirmAddPlayers() {
   }
 }
 
-// Admin only. The sessions stay in the hall of fame.
+// The creator (or a signed-in admin) can remove a campaign, running or finished. The sessions
+// stay in the hall of fame.
 function deleteCampaign(id) {
   const c = state.campaigns.find((x) => x.id === id);
-  if (!c || !state.admin.isAdmin) return;
+  if (!c) return;
+  if (!myRights(c).remove) return toast(`Only ${playerName(c.createdBy)} can remove this campaign.`);
   askConfirm({
     title: `Remove ${c.title}?`,
-    message: 'The campaign disappears from this page. Its sessions stay in the hall of fame.',
+    message: `The campaign disappears for everyone, and this can't be undone. Its ${plural(sessionsOf(state.plays, id).length, 'session')} stay in the hall of fame.`,
     label: 'Remove',
+    failMessage: "Couldn't remove the campaign. Please try again.",
   }, async () => {
     await state.store.deleteCampaign(id);
     toast('Campaign removed');
@@ -1707,13 +1837,26 @@ function openPlayerCard(id) {
         </ul>
       </div>`;
   }
+  // Their list of favourite / owned games (see "My games"). A short list starts open; a long one
+  // starts closed, so it doesn't push the stats off the card.
+  const theirs = gamesByName(player.games ?? []);
+  const mineCard = id === state.me;
+  const gamesBlock = `
+    <details class="card-games"${theirs.length <= 8 ? ' open' : ''}>
+      <summary><span class="h-small">Favourite &amp; owned games</span> <span class="count">${theirs.length}</span>${icon('chevron', 2)}</summary>
+      ${theirs.length
+    ? `<ul class="game-chips">${theirs.map((g) => `<li><a class="game-chip" href="${esc(g.id ? bggUrl(g.id) : bggSearchUrl(g.name))}" target="_blank" rel="noopener noreferrer">${esc(g.name)}${g.year ? ` <span class="game-year">${g.year}</span>` : ''}<span class="sr-only">(opens BoardGameGeek)</span></a></li>`).join('')}</ul>`
+    : `<p class="muted">${mineCard ? "You haven't saved any yet." : `${esc(player.name)} hasn't saved any yet.`}</p>`}
+      ${mineCard ? '<button type="button" class="link-btn" data-action="my-games">Edit my games</button>' : ''}
+    </details>`;
   $('#player-dialog').innerHTML = `
     <div class="sheet-head"><h2>Player card</h2>${closeBtn()}</div>
     <div class="sheet-body">
       <div class="card-head" style="--h:${hueOf(player.avatar)}">
         ${avatar(player.avatar, 64)}
-        <span class="card-name">${esc(player.name)}${id === state.me ? ' <em>(you)</em>' : ''}</span>
+        <span class="card-name">${esc(player.name)}${mineCard ? ' <em>(you)</em>' : ''}</span>
       </div>
+      ${gamesBlock}
       ${body}
     </div>`;
   $('#player-dialog').showModal();
@@ -1833,6 +1976,12 @@ function renderWho() {
         <div id="who-cands" class="cands"></div>
         <button type="button" class="btn" data-action="reroll">${icon('dice', 2)} More faces</button>
       </fieldset>
+      ${editing ? `
+      <section class="block">
+        <h3 class="h-small">My games <span id="who-games-count" class="count">${myGames().length}</span></h3>
+        <p class="muted">Your favourites and the games you own. They show first when you add a game to a day.</p>
+        <button type="button" class="btn" data-action="my-games">${icon('box', 2)} Manage my games</button>
+      </section>` : ''}
       <p id="who-error" class="error" role="alert" hidden></p>
       <div class="row">
         ${editing ? '<button type="button" class="btn" data-action="switch">Switch player</button>'
@@ -1910,8 +2059,11 @@ function claimPlayer(id) {
 // admin: sign in, and remove players
 // ---------------------------------------------------------------------------
 
-function askConfirm({ title, message, label }, onYes) {
+// `failMessage` is what's shown if it doesn't work; the default talks about the admin sign-in,
+// since that's what most confirmations need.
+function askConfirm({ title, message, label, failMessage }, onYes) {
   state.onConfirm = onYes;
+  state.confirmFail = failMessage;
   $('#confirm-dialog').innerHTML = `
     <div class="sheet-head">
       <h2>${esc(title)}</h2>
@@ -1936,7 +2088,7 @@ async function confirmYes(el) {
   } catch (err) {
     el.disabled = false;
     el.textContent = 'Try again';
-    fail(err, "That didn't work. Are you still signed in as admin?");
+    fail(err, state.confirmFail ?? "That didn't work. Are you still signed in as admin?");
   }
 }
 
@@ -2031,6 +2183,9 @@ const actions = {
   'toggle-me': toggleMe,
   'adder-open': openAdder,
   'adder-close': closeAdder,
+  'my-games': openMyGames,
+  'mg-add': (el) => addMyGame({ id: Number(el.dataset.id) || null, name: el.dataset.name, year: Number(el.dataset.year) || 0 }),
+  'mg-remove': (el) => removeMyGame(el.dataset.gk),
   'add-game': (el) => addGame({
     id: Number(el.dataset.id) || null,
     name: el.dataset.name,
@@ -2174,6 +2329,7 @@ document.addEventListener('input', (e) => {
   if (e.target.id === 'game-q') renderResults();
   if (e.target.id === 'log-q') renderLogResults();
   if (e.target.id === 'camp-q') renderCampResults();
+  if (e.target.id === 'mg-q') renderMyResults();
 });
 
 document.addEventListener('change', (e) => {
@@ -2194,6 +2350,9 @@ document.addEventListener('submit', (e) => {
 });
 
 $('#day-dialog').addEventListener('close', () => { state.openKey = null; });
+
+// Back from "My games" to a day's add-a-game panel: show the list as it is now.
+$('#form-dialog').addEventListener('close', () => { if ($('#game-q')) renderResults(); });
 
 // ---------------------------------------------------------------------------
 // data

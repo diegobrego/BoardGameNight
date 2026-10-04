@@ -8,6 +8,8 @@ import { buildIcs } from '../js/ics.js';
 import { tally, ranked, newestFirst, playerStats, awardTitles } from '../js/hall.js';
 import { pastDays, upcomingDays } from '../js/dates.js';
 import { sessionsOf, plannedOn, campaignRecord, sortCampaigns, defaultTitle, can, outsiders } from '../js/campaigns.js';
+import { MAX_MY_GAMES, hasGame, withGame, withoutGame, matchMine } from '../js/mygames.js';
+import { voteKey } from '../js/games.js';
 
 const encoder = new TextEncoder();
 const root = new URL('..', import.meta.url);
@@ -266,32 +268,64 @@ const root = new URL('..', import.meta.url);
   const done = { ...open, status: 'finished' };
 
   // a stranger can join an open campaign, but can't do anything else with it
-  assert.deepEqual(can(open, 'zoe'), { join: true, leave: false, log: false, plan: false, manage: false, reopen: false });
+  assert.deepEqual(can(open, 'zoe'), { join: true, leave: false, log: false, plan: false, manage: false, reopen: false, remove: false });
   assert.equal(can(locked, 'zoe').join, false, 'a locked campaign takes nobody new');
   assert.equal(can(open, null).join, false, 'nobody without a profile can join');
 
   // a member logs and plans, and may walk out until it is locked
-  assert.deepEqual(can(open, 'leo'), { join: false, leave: true, log: true, plan: true, manage: false, reopen: false });
-  assert.deepEqual(can(locked, 'leo'), { join: false, leave: false, log: true, plan: true, manage: false, reopen: false }, 'locked: nobody leaves');
+  assert.deepEqual(can(open, 'leo'), { join: false, leave: true, log: true, plan: true, manage: false, reopen: false, remove: false });
+  assert.deepEqual(can(locked, 'leo'), { join: false, leave: false, log: true, plan: true, manage: false, reopen: false, remove: false }, 'locked: nobody leaves');
 
-  // the creator runs it, is always in, and can still add people once it is locked
-  assert.deepEqual(can(open, 'mia'), { join: false, leave: false, log: true, plan: true, manage: true, reopen: false });
+  // the creator runs it, is always in, can still add people once it is locked, and can remove it
+  assert.deepEqual(can(open, 'mia'), { join: false, leave: false, log: true, plan: true, manage: true, reopen: false, remove: true });
   assert.equal(can(locked, 'mia').manage, true);
   assert.equal(can(open, 'leo').manage, false, 'only the creator finishes it');
+  assert.equal(can(open, 'leo').remove, false, 'only the creator removes it');
 
-  // a signed-in admin can run any campaign, but still has to be in it to log sessions
+  // a signed-in admin can run and remove any campaign, but still has to be in it to log sessions
   assert.equal(can(open, 'zoe', { admin: true }).manage, true);
+  assert.equal(can(open, 'zoe', { admin: true }).remove, true);
   assert.equal(can(open, 'zoe', { admin: true }).log, false);
 
-  // a finished campaign is closed to everyone, except that its creator (or an admin) can reopen it
+  // a finished campaign is closed to everyone, except that its creator (or an admin) can reopen
+  // or remove it
   const closed = { join: false, leave: false, log: false, plan: false, manage: false };
-  assert.deepEqual(can(done, 'mia'), { ...closed, reopen: true });
-  assert.deepEqual(can(done, 'zoe', { admin: true }), { ...closed, reopen: true });
-  assert.deepEqual(can(done, 'leo'), { ...closed, reopen: false }, 'a member can not reopen it');
-  assert.deepEqual(can(done, 'zoe'), { ...closed, reopen: false }, 'neither can a stranger');
+  assert.deepEqual(can(done, 'mia'), { ...closed, reopen: true, remove: true });
+  assert.deepEqual(can(done, 'zoe', { admin: true }), { ...closed, reopen: true, remove: true });
+  assert.deepEqual(can(done, 'leo'), { ...closed, reopen: false, remove: false }, 'a member can neither reopen nor remove it');
+  assert.deepEqual(can(done, 'zoe'), { ...closed, reopen: false, remove: false }, 'neither can a stranger');
   assert.equal(can(open, 'mia', { admin: true }).reopen, false, 'a running campaign has nothing to reopen');
 
   // who could still be added
   assert.deepEqual(outsiders(open, [{ id: 'mia' }, { id: 'zoe' }, { id: 'sam' }]).map((p) => p.id), ['zoe', 'sam']);
   console.log('ok  campaign rights');
+}
+
+// ---- my games (a player's favourite / owned list) ----------------------------------------
+{
+  const azul = { id: 230802, name: 'Azul', year: 2017 };
+  const arcs = { id: 359871, name: 'Arcs', year: 2024 };
+  const byName = { id: null, name: 'Café Bonito!', year: 0 };
+
+  let list = [];
+  list = withGame(list, azul);
+  list = withGame(list, byName);
+  list = withGame(list, arcs);
+  assert.deepEqual(list.map((g) => g.name), ['Azul', 'Café Bonito!', 'Arcs'], 'added in order, as plain { id, name, year }');
+  assert.equal(withGame(list, { ...azul, by: 'someone' }), null, 'a game already on the list is not added twice');
+  assert.equal(withGame(list, { id: null, name: 'cafe bonito' }), null, 'same name, case and accents ignored, counts as the same game');
+  assert.ok(hasGame(list, { id: 359871 }), 'found by its BGG id');
+
+  assert.deepEqual(withoutGame(list, voteKey(azul)).map((g) => g.name), ['Café Bonito!', 'Arcs'], 'removed by its key');
+  assert.equal(withoutGame(list, 'g1').length, 3, 'removing something that is not there changes nothing');
+
+  assert.deepEqual(matchMine(list, '').map((g) => g.name), ['Arcs', 'Azul', 'Café Bonito!'], 'no search: all of them, A to Z');
+  assert.deepEqual(matchMine(list, 'ar').map((g) => g.name), ['Arcs'], 'a search narrows the list');
+  assert.deepEqual(matchMine([...list, { id: 1, name: 'Star Realms' }], 'ar').map((g) => g.name), ['Arcs', 'Star Realms'], 'names starting with it come first');
+  assert.deepEqual(matchMine(list, 'CAFE').map((g) => g.name), ['Café Bonito!'], 'case and accents are ignored');
+  assert.deepEqual(matchMine(list, 'zzz'), [], 'nothing matches');
+
+  const full = Array.from({ length: MAX_MY_GAMES }, (_, i) => ({ id: i + 1, name: `Game ${i + 1}`, year: 0 }));
+  assert.equal(withGame(full, azul), null, 'the list has a limit');
+  console.log('ok  my games');
 }

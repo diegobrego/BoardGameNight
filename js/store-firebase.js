@@ -1,6 +1,6 @@
 // SHARED backend: Cloud Firestore (free "Spark" plan is plenty for a friend group).
 // Data layout:
-//   players/{id}        { name, avatar }
+//   players/{id}        { name, avatar, games?: [{ id, name, year }] }   (games: their favourites / owned list)
 //   days/{YYYY-MM-DD}   { players: [playerId, ...], games: [{ id, name, year, by }, ...],
 //                         votes:  { [voteKey]: [playerId, ...] },
 //                         brings: { [voteKey]: [playerId, ...] },
@@ -72,6 +72,9 @@ export function create(config) {
     },
 
     updatePlayer: (id, patch) => updateDoc(doc(playersCol, id), patch),
+
+    // A player's list of favourite / owned games: [{ id, name, year }], saved as a whole.
+    setPlayerGames: (id, games) => updateDoc(doc(playersCol, id), { games }),
 
     async setAvailability(playerId, add, remove) {
       const batch = writeBatch(db);
@@ -169,7 +172,7 @@ export function create(config) {
       [`names.${playerId}`]: deleteField(),
     }),
 
-    // Admin only (the rules enforce it).
+    // The site offers this to the campaign's creator and to admins (the sessions stay).
     deleteCampaign: (id) => deleteDoc(doc(campaignsCol, id)),
 
     // Admin only (the rules enforce it). Finds every day the player ever picked, not
