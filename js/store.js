@@ -8,7 +8,8 @@
 //   addPlayer({ name, avatar })          -> id
 //   updatePlayer(id, { name, avatar })
 //   setAvailability(playerId, addDates, removeDates)
-//   addGame(date, game) / removeGame(date, game)
+//   addGame(date, game) / removeGame(date, game)   (removing a game also drops its votes)
+//   toggleVote(date, voteKey, playerId, on)         days[date].votes: { [voteKey]: [playerId] }
 //
 // Admin tools:
 //   deletePlayer(id)                     removes the player and takes them off every day

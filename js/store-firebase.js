@@ -1,7 +1,8 @@
 // SHARED backend: Cloud Firestore (free "Spark" plan is plenty for a friend group).
 // Data layout:
 //   players/{id}        { name, avatar }
-//   days/{YYYY-MM-DD}   { players: [playerId, ...], games: [{ id, name, year, by }, ...] }
+//   days/{YYYY-MM-DD}   { players: [playerId, ...], games: [{ id, name, year, by }, ...],
+//                         votes: { [voteKey]: [playerId, ...] } }
 //   admins/{uid}        created by hand in the Firebase console; makes that Google
 //                       account an admin (see firestore.rules and the README)
 // Availability and games use arrayUnion/arrayRemove, so two people saving at the
@@ -13,8 +14,9 @@ import {
 } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
 import {
   getFirestore, collection, doc, onSnapshot, getDocs, addDoc, updateDoc, setDoc, writeBatch,
-  arrayUnion, arrayRemove, query, where, documentId, serverTimestamp,
+  arrayUnion, arrayRemove, deleteField, query, where, documentId, serverTimestamp,
 } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
+import { voteKey } from './games.js';
 
 export function create(config) {
   const app = initializeApp(config);
@@ -44,7 +46,7 @@ export function create(config) {
       const range = query(daysCol, where(documentId(), '>=', from), where(documentId(), '<=', to));
       const offDays = onSnapshot(range, (snap) => {
         days = {};
-        snap.forEach((d) => { days[d.id] = { players: [], games: [], ...d.data() }; });
+        snap.forEach((d) => { days[d.id] = { players: [], games: [], votes: {}, ...d.data() }; });
         daysSynced = !snap.metadata.fromCache;
         emit();
       }, onError);
@@ -68,8 +70,21 @@ export function create(config) {
 
     addGame: (date, game) => setDoc(doc(daysCol, date), { games: arrayUnion(game) }, { merge: true }),
 
-    // `game` must be the object exactly as it came from a snapshot.
-    removeGame: (date, game) => setDoc(doc(daysCol, date), { games: arrayRemove(game) }, { merge: true }),
+    // `game` must be the object exactly as it came from a snapshot. Its votes go with it.
+    removeGame: (date, game) => setDoc(
+      doc(daysCol, date),
+      { games: arrayRemove(game), votes: { [voteKey(game)]: deleteField() } },
+      { merge: true },
+    ),
+
+    // votes: { [voteKey]: [playerId, ...] } on the day document. One entry per player
+    // per game, and arrayUnion/arrayRemove keep simultaneous voters from clobbering
+    // each other. (Votes left behind by a removed player are ignored when displayed.)
+    toggleVote: (date, key, playerId, on) => setDoc(
+      doc(daysCol, date),
+      { votes: { [key]: on ? arrayUnion(playerId) : arrayRemove(playerId) } },
+      { merge: true },
+    ),
 
     // Admin only (the rules enforce it). Finds every day the player ever picked, not
     // just the visible two weeks. A batch holds at most 500 writes, so a very long

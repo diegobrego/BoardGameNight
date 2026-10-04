@@ -29,6 +29,15 @@ export function loadGames() {
   return loading;
 }
 
+// A stable, database-safe key for a game on a day's list. It identifies the game when
+// voting, removing and checking for duplicates. BGG games key on their id; games
+// added by name key on the normalised name.
+export function voteKey(game) {
+  if (game.id) return `g${game.id}`;
+  const slug = normalize(game.name).replace(/ /g, '_').slice(0, 60);
+  return `n_${slug || 'unnamed'}`;
+}
+
 export const isLoaded = () => index !== null;
 export const findGame = (id) => index?.find((g) => g.id === id) ?? null;
 

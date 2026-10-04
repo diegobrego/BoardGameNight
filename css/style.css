@@ -205,7 +205,7 @@ a.btn { text-decoration: none; }
 /* "I'm free" = solid purple */
 .day.is-mine { background: var(--solid); color: var(--on-solid); background-image: none; }
 
-/* 3+ players = green double ring (+ a "Game on" tag, so it isn't colour alone) */
+/* enough players (MIN_PLAYERS) = green double ring (+ a "Game on" tag, so it isn't colour alone) */
 .day.is-go {
   border-color: var(--go);
   box-shadow: 0 0 0 3px var(--paper), 0 0 0 6px var(--go);
@@ -355,15 +355,34 @@ a.btn { text-decoration: none; }
 
 .games { display: grid; gap: 8px; }
 .game {
-  display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 8px;
-  padding: 8px 8px 8px 12px;
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px;
+  padding: 8px;
   border: var(--bw) solid var(--line); border-radius: 12px;
 }
+.game.is-top { border-color: var(--solid); box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px var(--solid); }
+.game-main { display: grid; justify-items: start; gap: 4px; min-width: 0; }
 .game-link { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; text-decoration: none; font-weight: 700; }
 .game-name { font-size: 19px; }
 .game-year { opacity: .6; font-weight: 400; }
-.game-by { grid-column: 1; display: inline-flex; align-items: center; gap: 6px; font-size: 14px; opacity: .8; }
-.game .icon-btn { grid-column: 2; grid-row: 1 / span 2; }
+.game-by { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; opacity: .8; }
+.game-voters { display: inline-flex; flex-wrap: wrap; gap: 3px; }
+
+/* voting: tap to vote for a game, tap again to take it back */
+.vote {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  width: 50px; min-height: 54px; padding: 4px 0;
+  background: var(--paper); color: var(--ink);
+  border: var(--bw) solid var(--line); border-radius: 10px;
+  font-weight: 800; line-height: 1.1;
+}
+.vote.is-on { background: var(--solid); color: var(--on-solid); }
+.top-pick {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 0 8px 0 6px;
+  background: var(--solid); color: var(--on-solid); border-radius: 7px;
+  font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+}
+.top-pick .ico { width: 13px; height: 13px; }
 
 #dp-add-form { display: grid; gap: 10px; }
 #dp-add-form[hidden] { display: none; }
@@ -448,6 +467,8 @@ input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; d
   .chip:hover { background: var(--on-solid); color: var(--solid); border-color: var(--on-solid); }
   .result:hover, .person-btn:hover, .cand:hover { background: var(--solid); color: var(--on-solid); }
   .game-link:hover .game-name { text-decoration: underline; text-underline-offset: 3px; }
+  .vote:hover { background: var(--solid); color: var(--on-solid); }
+  .vote.is-on:hover { background: var(--paper); color: var(--ink); }
 
   /* day tiles: a dashed halo, so hover never looks like "selected" */
   .day:hover { outline: 3px dashed var(--line); outline-offset: 4px; }

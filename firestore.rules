@@ -34,13 +34,16 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // One document per calendar day, named like "2026-10-09".
+    // One document per calendar day, named like "2026-10-09". `votes` maps a game to
+    // the players who voted for it.
     match /days/{day} {
       allow read: if true;
       allow create, update: if day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-                            && request.resource.data.keys().hasOnly(['players', 'games'])
+                            && request.resource.data.keys().hasOnly(['players', 'games', 'votes'])
                             && request.resource.data.get('players', []).size() <= 50
-                            && request.resource.data.get('games', []).size() <= 50;
+                            && request.resource.data.get('games', []).size() <= 50
+                            && request.resource.data.get('votes', {}) is map
+                            && request.resource.data.get('votes', {}).size() <= 50;
       allow delete: if false;
     }
   }

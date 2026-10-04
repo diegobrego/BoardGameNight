@@ -1,6 +1,6 @@
 # Board Game Night
 
-A tiny website for a board game group. Everyone picks the days they're free over the next two weeks, days with 3+ free players light up green, and on those days the group can pile up game options with links to BoardGameGeek.
+A tiny website for a board game group. Everyone picks the days they're free over the next two weeks, days with 2+ free players light up green, and on those days the group can pile up game options with links to BoardGameGeek.
 
 Plain HTML/CSS/JS, no build step, hosted for free on GitHub Pages. Look: a Playdate feel (dither patterns, hard shadows, pixel-art player faces) in purple, with a rounded easy-to-read font and crisp vector icons. There's a **light and a dark theme**: it follows the device by default, and the sun/moon button in the header switches it (and remembers the choice). Green is reserved for "game on" days.
 
@@ -61,11 +61,15 @@ In admin mode you get an **Admin** tag and an **X** next to everyone in "The cre
 
 - **First visit:** pick your name from the list, or add yourself (type a name, choose a pixel face). Your device remembers you; tap your name in the top corner to edit your profile or switch player.
 - **Pick my days:** tap every day you can play, then **Save**. Green days update live as you tick them.
-- **Green days** (3+ free players) are marked with a green double border and a **Game on** tag. Tap one to see who's in and to add game options with the **+** button. Games link to their BoardGameGeek page.
+- **Green days** (2+ free players, set by `MIN_PLAYERS`) are marked with a green double border and a **Game on** tag. Tap one to see who's in and to add game options with the **+** button. Games link to their BoardGameGeek page.
+
+- **Voting:** every game on a day has an up-arrow button. Tap it for each game you'd be happy to play (tap again to take the vote back; you can vote for several). The list sorts by votes, shows who voted, and the leader gets a **Top pick** tag. Removing a game removes its votes.
 
 ## Things to know
 
-- **No passwords for players.** Anyone with the link can use any name, and can edit anyone's days. That's the trade-off for zero sign-up; it's fine for friends, but don't put anything private in it. Only the admin is verified (Google sign-in), and only for removing players.
+- **When the rules change, re-publish them.** Some updates change [`firestore.rules`](firestore.rules). The voting update did: it lets days store `votes`. After pulling such an update, paste the file into Firebase console → Firestore Database → **Rules** and **Publish**, or the new feature will fail to save.
+- **No passwords for players.** Tapping a name in "Who are you?" makes that device that person, and from then on it can change that person's days and profile (name and face) for everyone. The site asks "Are you …?" first, but that's a speed bump, not a lock. It's the trade-off for zero sign-up: fine for friends, but don't put anything private in it. Only the admin is verified (Google sign-in), and only for removing players. A real lock would mean player accounts (for example Google sign-in per player).
+- **If someone ends up as you by mistake:** they tap their name at the top → **Edit profile** → **Switch player** → **I'm new here**. Then you change your own name and face back the same way.
 - **Game search is local.** BoardGameGeek's API now requires a private token and blocks browser requests, so the site ships with a compact index of ~14,000 BGG games ([`data/games.json`](data/games.json), built from a public daily ranking dump). A game that isn't in the index can still be added by name (its link opens a BGG search), or by pasting its BGG link. To refresh the index: `node tools/update-games.mjs`.
 - **Removing people:** the admin does it from the site (see above). Old days can be tidied in the Firebase console (Firestore Database → `days`).
 

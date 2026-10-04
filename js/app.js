@@ -4,7 +4,7 @@ import { avatar, randomSeed } from './avatar.js';
 import { icon, iconInner } from './icons.js';
 import { upcomingDays, longLabel, rangeLabel } from './dates.js';
 import {
-  loadGames, isLoaded, findGame, searchGames, bggUrl, bggSearchUrl, parseBggLink, titleFromSlug,
+  loadGames, isLoaded, findGame, searchGames, bggUrl, bggSearchUrl, parseBggLink, titleFromSlug, voteKey,
 } from './games.js';
 
 // ---------------------------------------------------------------------------
@@ -16,7 +16,6 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
 ));
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-const gameKey = (g) => String(g.id ?? g.name.toLowerCase());
 
 const ls = {
   get(key) { try { return localStorage.getItem(key); } catch { return null; } },
@@ -351,17 +350,36 @@ function renderDayPanel() {
     <h3 class="h-small">Game options <span class="count">${games.length}</span></h3>
     ${go ? '' : `<p class="lock">${icon('star', 2)} Unlocks when ${MIN_PLAYERS}+ players are free (${ids.length}/${MIN_PLAYERS}).</p>`}`;
 
-  $('#dp-list').innerHTML = games.length
-    ? games.map((g) => {
+  // Most votes first; games with the same number of votes keep the order they were added.
+  // Votes from players who no longer exist are ignored.
+  const votes = state.days[key]?.votes ?? {};
+  const ranked = games
+    .map((g, i) => ({ g, i, voters: (votes[voteKey(g)] ?? []).filter((id) => state.players[id]).sort(byName) }))
+    .sort((a, b) => b.voters.length - a.voters.length || a.i - b.i);
+  const topVotes = ranked[0]?.voters.length ?? 0;
+
+  $('#dp-list').innerHTML = ranked.length
+    ? ranked.map(({ g, voters }) => {
       const by = state.players[g.by];
+      const k = voteKey(g);
+      const voted = !!state.me && voters.includes(state.me);
+      const top = ranked.length > 1 && topVotes > 0 && voters.length === topVotes;
       return `
-        <li class="game">
-          <a class="game-link" href="${g.id ? bggUrl(g.id) : bggSearchUrl(g.name)}" target="_blank" rel="noopener noreferrer">
-            <span class="game-name">${esc(g.name)}</span>${g.year ? `<span class="game-year">${g.year}</span>` : ''}${icon('arrow', 2)}
-            <span class="sr-only">(opens BoardGameGeek)</span>
-          </a>
-          ${by ? `<span class="game-by">added by ${avatar(by.avatar, 18)} ${esc(by.name)}</span>` : ''}
-          ${g.by === state.me || state.admin.isAdmin ? `<button type="button" class="icon-btn" data-action="remove-game" data-gk="${esc(gameKey(g))}" aria-label="Remove ${esc(g.name)}">${icon('x', 2)}</button>` : ''}
+        <li class="game${top ? ' is-top' : ''}">
+          <button type="button" class="vote${voted ? ' is-on' : ''}" data-action="vote" data-gk="${esc(k)}" aria-pressed="${voted}"
+            aria-label="${voted ? 'Take back your vote for' : 'Vote for'} ${esc(g.name)} (${plural(voters.length, 'vote')} so far)">
+            ${icon('up', 2)}<span>${voters.length}</span>
+          </button>
+          <div class="game-main">
+            <a class="game-link" href="${g.id ? bggUrl(g.id) : bggSearchUrl(g.name)}" target="_blank" rel="noopener noreferrer">
+              <span class="game-name">${esc(g.name)}</span>${g.year ? `<span class="game-year">${g.year}</span>` : ''}${icon('arrow', 2)}
+              <span class="sr-only">(opens BoardGameGeek)</span>
+            </a>
+            ${top ? `<span class="top-pick">${icon('star', 2)}<span>Top pick</span></span>` : ''}
+            ${voters.length ? `<span class="game-voters"><span class="sr-only">Votes from:</span>${voters.map((id) => avatar(state.players[id].avatar, 20, state.players[id].name)).join('')}</span>` : ''}
+            ${by ? `<span class="game-by">added by ${avatar(by.avatar, 18)} ${esc(by.name)}</span>` : ''}
+          </div>
+          ${g.by === state.me || state.admin.isAdmin ? `<button type="button" class="icon-btn" data-action="remove-game" data-gk="${esc(k)}" aria-label="Remove ${esc(g.name)}">${icon('x', 2)}</button>` : ''}
         </li>`;
     }).join('')
     : go ? '<li class="muted">No games yet. Add the first one!</li>' : '';
@@ -440,7 +458,7 @@ function renderResults() {
 async function addGame(game) {
   if (!state.me) return openWho('choose');
   const key = state.openKey;
-  if ((state.days[key]?.games ?? []).some((g) => gameKey(g) === gameKey(game))) {
+  if ((state.days[key]?.games ?? []).some((g) => voteKey(g) === voteKey(game))) {
     toast('Already on the list');
     return;
   }
@@ -456,13 +474,26 @@ async function addGame(game) {
 async function removeGame(el) {
   const key = state.openKey;
   const game = (state.days[key]?.games ?? []).find(
-    (g) => gameKey(g) === el.dataset.gk && (g.by === state.me || state.admin.isAdmin),
+    (g) => voteKey(g) === el.dataset.gk && (g.by === state.me || state.admin.isAdmin),
   );
   if (!game) return;
   try {
     await state.store.removeGame(key, game);
   } catch (err) {
     fail(err);
+  }
+}
+
+// Tap once to vote for a game, tap again to take the vote back. Vote for as many as you like.
+async function vote(el) {
+  if (!state.me) return openWho('choose');
+  const key = state.openKey;
+  const gk = el.dataset.gk;
+  const alreadyVoted = (state.days[key]?.votes?.[gk] ?? []).includes(state.me);
+  try {
+    await state.store.toggleVote(key, gk, state.me, !alreadyVoted);
+  } catch (err) {
+    fail(err, "Couldn't save your vote. Please try again.");
   }
 }
 
@@ -498,10 +529,13 @@ function renderWho() {
     $('#who-dialog').innerHTML = `
       <div class="sheet-head"><h2>Who are you?</h2>${close}</div>
       <div class="sheet-body">
-        <p class="muted">Pick your name so everyone can see when you're free.</p>
-        <ul class="pick-list">${list.map((p) => `
-          <li><button type="button" class="person-btn${p.id === state.me ? ' is-me' : ''}" data-action="pick-player" data-id="${esc(p.id)}">${avatar(p.avatar, 36)}<span>${esc(p.name)}</span></button></li>`).join('')}</ul>
-        <button type="button" class="btn btn--solid" data-action="new-player">${icon('plus', 2)} I'm new here</button>
+        <button type="button" class="btn btn--solid btn--wide" data-action="new-player">${icon('plus', 2)} I'm new here</button>
+        <section class="block">
+          <h3 class="h-small">Already in the crew?</h3>
+          <p class="muted">Tap your own name. Don't tap someone else's: that lets you change their days and profile.</p>
+          <ul class="pick-list">${list.map((p) => `
+            <li><button type="button" class="person-btn${p.id === state.me ? ' is-me' : ''}" data-action="pick-player" data-id="${esc(p.id)}">${avatar(p.avatar, 36)}<span>${esc(p.name)}</span></button></li>`).join('')}</ul>
+        </section>
       </div>`;
     return;
   }
@@ -510,6 +544,7 @@ function renderWho() {
   $('#who-dialog').innerHTML = `
     <div class="sheet-head"><h2>${title}</h2>${close}</div>
     <form id="who-form" class="sheet-body" autocomplete="off">
+      ${editing ? `<p class="muted">You're editing <strong>${esc(state.players[state.me].name)}</strong>'s profile for everyone. If that isn't you, tap <em>Switch player</em> and then <em>I'm new here</em> instead of renaming it.</p>` : ''}
       <label class="field"><span>Your name</span>
         <input name="name" maxlength="20" required placeholder="Type your name" value="${esc(editing ? state.players[state.me].name : '')}">
       </label>
@@ -567,6 +602,26 @@ async function submitWho(form) {
     submit.disabled = false;
     fail(err, "Couldn't save your profile. Please try again.");
   }
+}
+
+// Picking an existing name makes this device that person: it can then change their days
+// and profile. There are no passwords, so the only safeguard is asking first.
+function claimPlayer(id) {
+  const player = state.players[id];
+  if (!player) return;
+  if (id === state.me) {
+    $('#who-dialog').close();
+    return;
+  }
+  askConfirm({
+    title: `Are you ${player.name}?`,
+    message: `Only say yes if ${player.name} is you. This device will be able to change ${player.name}'s days and profile for everyone. If you're someone new, go back and tap "I'm new here".`,
+    label: `Yes, I'm ${player.name}`,
+  }, async () => {
+    setMe(id);
+    $('#who-dialog').close();
+    toast(`Hi ${player.name}!`);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -698,16 +753,13 @@ const actions = {
     year: Number(el.dataset.year) || 0,
   }),
   'remove-game': removeGame,
+  vote,
   profile: () => openWho('edit'),
   who: () => openWho('choose'),
   switch: () => openWho('choose'),
   back: () => openWho('choose'),
   'new-player': () => openWho('create'),
-  'pick-player': (el) => {
-    setMe(el.dataset.id);
-    $('#who-dialog').close();
-    toast(`Hi ${state.players[el.dataset.id].name}!`);
-  },
+  'pick-player': (el) => claimPlayer(el.dataset.id),
   cand: (el) => { state.who.sel = Number(el.dataset.i); renderCands(); },
   reroll: rerollFaces,
   'close-dialog': (el) => el.closest('dialog').close(),

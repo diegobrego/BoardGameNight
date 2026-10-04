@@ -3,6 +3,7 @@
 
 import { randomSeed } from './avatar.js';
 import { upcomingDays } from './dates.js';
+import { voteKey } from './games.js';
 
 const KEY = 'bgn.demo.v1';
 
@@ -15,7 +16,11 @@ function seed() {
     [keys[1]]: { players: ['demo0', 'demo1'], games: [] },
     [keys[3]]: {
       players: ['demo0', 'demo1', 'demo2'],
-      games: [{ id: 13, name: 'Catan', year: 1995, by: 'demo0' }],
+      games: [
+        { id: 13, name: 'Catan', year: 1995, by: 'demo0' },
+        { id: 230802, name: 'Azul', year: 2017, by: 'demo1' },
+      ],
+      votes: { g13: ['demo0'], g230802: ['demo1', 'demo2'] },
     },
     [keys[5]]: { players: ['demo1', 'demo2', 'demo3', 'demo0'], games: [] },
     [keys[6]]: { players: ['demo3'], games: [] },
@@ -87,12 +92,26 @@ export function create() {
     async removeGame(date, game) {
       const d = day(date);
       d.games = d.games.filter((g) => !same(g, game));
+      if (d.votes) delete d.votes[voteKey(game)];
+      persist(); emit();
+    },
+
+    // One vote per player per game; a player can vote for as many games as they like.
+    async toggleVote(date, key, playerId, on) {
+      const votes = (day(date).votes ??= {});
+      const voters = votes[key] ?? [];
+      votes[key] = on
+        ? [...voters.filter((id) => id !== playerId), playerId]
+        : voters.filter((id) => id !== playerId);
       persist(); emit();
     },
 
     async deletePlayer(id) {
       delete state.players[id];
-      for (const d of Object.values(state.days)) d.players = d.players.filter((p) => p !== id);
+      for (const d of Object.values(state.days)) {
+        d.players = d.players.filter((p) => p !== id);
+        for (const [k, voters] of Object.entries(d.votes ?? {})) d.votes[k] = voters.filter((p) => p !== id);
+      }
       persist(); emit();
     },
 
