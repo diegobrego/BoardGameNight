@@ -16,7 +16,7 @@ export const firebaseConfig = {
 };
 
 // How many free players it takes for a day to light up (and unlock game options).
-export const MIN_PLAYERS = 3;
+export const MIN_PLAYERS = 2;
 
 // How many days the calendar shows, starting today.
 export const DAYS_AHEAD = 14;
