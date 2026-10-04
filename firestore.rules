@@ -59,7 +59,7 @@ service cloud.firestore {
     // added by anyone, never edited, and only an admin can remove one.
     match /plays/{playId} {
       allow read: if true;
-      allow create: if request.resource.data.keys().hasOnly(['date', 'game', 'winner', 'players', 'names', 'loggedBy', 'createdAt'])
+      allow create: if request.resource.data.keys().hasOnly(['date', 'game', 'winner', 'players', 'names', 'loggedBy', 'createdAt', 'note', 'campaign'])
                     && request.resource.data.date is string
                     && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
                     && request.resource.data.game is map
@@ -71,8 +71,59 @@ service cloud.firestore {
                     && request.resource.data.players.size() >= 1
                     && request.resource.data.players.size() <= 30
                     && request.resource.data.names is map
-                    && request.resource.data.names.size() <= 30;
+                    && request.resource.data.names.size() <= 30
+                    && request.resource.data.get('note', '').size() <= 140
+                    && request.resource.data.get('campaign', '').size() <= 40;
       allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    // Campaigns: long games played over several sessions (Arcs, Oath...). Their sessions are
+    // ordinary `plays` entries that carry the campaign's id. Anyone can start one. While it is
+    // running, the people in it, the lock, the planned next date and the finish (status, date,
+    // winner) can change. Once finished it is frozen, apart from being reopened (status back to
+    // 'active', no winner, no finish date). (The site only lets the creator lock, add people
+    // after the lock, finish and reopen, but these rules can't check who is who: players have
+    // no passwords, so a determined friend could still do it by hand.)
+    match /campaigns/{campaignId} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(['game', 'title', 'players', 'names', 'status', 'locked', 'startedAt', 'next', 'finishedAt', 'winner', 'createdBy', 'createdAt'])
+                    && request.resource.data.locked == false
+                    && request.resource.data.game is map
+                    && request.resource.data.game.name is string
+                    && request.resource.data.game.name.size() > 0
+                    && request.resource.data.game.name.size() <= 100
+                    && request.resource.data.title is string
+                    && request.resource.data.title.size() > 0
+                    && request.resource.data.title.size() <= 80
+                    && request.resource.data.players is list
+                    && request.resource.data.players.size() >= 1
+                    && request.resource.data.players.size() <= 30
+                    && request.resource.data.names is map
+                    && request.resource.data.names.size() <= 30
+                    && request.resource.data.status == 'active'
+                    && request.resource.data.startedAt.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+                    && request.resource.data.next.matches('^([0-9]{4}-[0-9]{2}-[0-9]{2})?$')
+                    && request.resource.data.finishedAt == ''
+                    && request.resource.data.winner == null;
+      allow update: if resource.data.status == 'active'
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['players', 'names', 'locked', 'next', 'status', 'finishedAt', 'winner'])
+                    && request.resource.data.players is list
+                    && request.resource.data.players.size() >= 1
+                    && request.resource.data.players.size() <= 30
+                    && request.resource.data.names is map
+                    && request.resource.data.names.size() <= 30
+                    && request.resource.data.get('locked', false) is bool
+                    && request.resource.data.status in ['active', 'finished']
+                    && request.resource.data.next.matches('^([0-9]{4}-[0-9]{2}-[0-9]{2})?$')
+                    && request.resource.data.finishedAt.matches('^([0-9]{4}-[0-9]{2}-[0-9]{2})?$')
+                    && (request.resource.data.winner == null || request.resource.data.winner is string);
+      // reopening a finished campaign: nothing else about it changes
+      allow update: if resource.data.status == 'finished'
+                    && request.resource.data.status == 'active'
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'finishedAt', 'winner'])
+                    && request.resource.data.finishedAt == ''
+                    && request.resource.data.winner == null;
       allow delete: if isAdmin();
     }
   }

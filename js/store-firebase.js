@@ -6,7 +6,11 @@
 //                         brings: { [voteKey]: [playerId, ...] },
 //                         details: { place, time } }
 //   plays/{id}          one entry in the hall of fame:
-//                       { date, game: { id, name, year }, winner, players: [id], names: { id: name }, loggedBy }
+//                       { date, game: { id, name, year }, winner, players: [id], names: { id: name },
+//                         loggedBy, note?, campaign? }   (campaign = the id of a campaigns/ document)
+//   campaigns/{id}      a long game played over several sessions:
+//                       { game, title, players: [id], names, status: 'active'|'finished', locked,
+//                         startedAt, next, finishedAt, winner, createdBy }
 //   admins/{uid}        created by hand in the Firebase console; makes that Google
 //                       account an admin (see firestore.rules and the README)
 // Availability and games use arrayUnion/arrayRemove, so two people saving at the
@@ -29,6 +33,7 @@ export function create(config) {
   const playersCol = collection(db, 'players');
   const daysCol = collection(db, 'days');
   const playsCol = collection(db, 'plays');
+  const campaignsCol = collection(db, 'campaigns');
 
   return {
     mode: 'firebase',
@@ -131,6 +136,41 @@ export function create(config) {
 
     // Admin only (the rules enforce it).
     deletePlay: (id) => deleteDoc(doc(playsCol, id)),
+
+    // Campaigns: long games played over several sessions. A campaign's sessions are plays
+    // (above) that carry the campaign's id. Like the hall of fame, this has its own listener.
+    subscribeCampaigns(onData, onError) {
+      return onSnapshot(campaignsCol, (snap) => {
+        onData(snap.docs.map((d) => {
+          const v = d.data();
+          return { id: d.id, ...v, createdAt: v.createdAt?.toMillis?.() ?? 0 };
+        }));
+      }, onError);
+    },
+
+    async createCampaign(campaign) {
+      const ref = await addDoc(campaignsCol, { ...campaign, createdAt: serverTimestamp() });
+      return ref.id;
+    },
+
+    // Only the planned next date, the lock and the finish (status, date, winner) can be changed
+    // this way; the people in it have their own two calls below.
+    updateCampaign: (id, patch) => updateDoc(doc(campaignsCol, id), patch),
+
+    // Joining and leaving use arrayUnion/arrayRemove, so two people joining at the same moment
+    // never overwrite each other. `people` is [{ id, name }].
+    addCampaignPlayers(id, people) {
+      const patch = { players: arrayUnion(...people.map((p) => p.id)) };
+      for (const p of people) patch[`names.${p.id}`] = p.name;
+      return updateDoc(doc(campaignsCol, id), patch);
+    },
+    removeCampaignPlayer: (id, playerId) => updateDoc(doc(campaignsCol, id), {
+      players: arrayRemove(playerId),
+      [`names.${playerId}`]: deleteField(),
+    }),
+
+    // Admin only (the rules enforce it).
+    deleteCampaign: (id) => deleteDoc(doc(campaignsCol, id)),
 
     // Admin only (the rules enforce it). Finds every day the player ever picked, not
     // just the visible two weeks. A batch holds at most 500 writes, so a very long

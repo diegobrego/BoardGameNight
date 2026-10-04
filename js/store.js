@@ -18,6 +18,14 @@
 //       play: { id, date, game: { id, name, year }, winner: id|null,
 //               players: [id], names: { [id]: name }, loggedBy, createdAt }
 //   logPlay(play) -> id        deletePlay(id)   (admin only)
+//       a play may also carry  note  and  campaign (a campaign id: it is a session of that campaign)
+//
+// Campaigns (long games over several sessions, e.g. Arcs or Oath):
+//   subscribeCampaigns(onData(campaigns[]), onError) -> unsubscribe
+//       campaign: { id, title, game, players: [id], names, status: 'active'|'finished', locked,
+//                   startedAt, next, finishedAt, winner, createdBy, createdAt }
+//   createCampaign(campaign) -> id    updateCampaign(id, patch)    deleteCampaign(id)  (admin only)
+//   addCampaignPlayers(id, [{ id, name }])    removeCampaignPlayer(id, playerId)
 //
 // Admin tools:
 //   deletePlayer(id)                     removes the player and takes them off every day

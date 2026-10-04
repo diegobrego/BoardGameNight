@@ -19,7 +19,7 @@
       }
       var root = document.documentElement;
       root.setAttribute('data-theme', theme);
-      root.setAttribute('data-page', location.hash === '#hall' ? 'hall' : 'calendar');
+      root.setAttribute('data-page', location.hash === '#hall' ? 'hall' : location.hash === '#campaigns' ? 'campaigns' : 'calendar');
     })();
   </script>
   <link rel="icon" id="favicon" href="data:,">
@@ -46,6 +46,7 @@
 
     <nav class="tabs" aria-label="Pages">
       <a id="tab-calendar" class="tab" href="#calendar"></a>
+      <a id="tab-campaigns" class="tab" href="#campaigns"></a>
       <a id="tab-hall" class="tab" href="#hall"></a>
     </nav>
 
@@ -61,11 +62,22 @@
             <span id="range" class="range"></span>
           </div>
           <div id="toolbar" class="toolbar"></div>
+          <div id="lastweek" class="lastweek"></div>
           <div id="calendar" class="calendar"></div>
           <ul id="legend" class="legend"></ul>
         </section>
 
         <section id="crew" class="crew" hidden></section>
+      </div>
+
+      <div id="view-campaigns" hidden>
+        <section class="board campaigns" aria-labelledby="campaigns-title">
+          <div class="board-head">
+            <h2 id="campaigns-title">Campaigns</h2>
+            <span id="campaigns-count" class="range"></span>
+          </div>
+          <div id="campaigns-body"></div>
+        </section>
       </div>
 
       <div id="view-hall" hidden>
@@ -90,6 +102,9 @@
   <dialog id="day-dialog" class="sheet" aria-labelledby="dp-title"></dialog>
   <dialog id="details-dialog" class="sheet"></dialog>
   <dialog id="log-dialog" class="sheet"></dialog>
+  <dialog id="campaign-dialog" class="sheet"></dialog>
+  <dialog id="form-dialog" class="sheet"></dialog>
+  <dialog id="player-dialog" class="sheet"></dialog>
   <dialog id="who-dialog" class="sheet"></dialog>
   <dialog id="confirm-dialog" class="sheet"></dialog>
   <dialog id="info-dialog" class="sheet"></dialog>

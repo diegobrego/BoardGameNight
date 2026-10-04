@@ -17,6 +17,7 @@ const SHELL = [
   'js/store-local.js',
   'js/store-firebase.js',
   'js/avatar.js',
+  'js/campaigns.js',
   'js/dates.js',
   'js/games.js',
   'js/hall.js',

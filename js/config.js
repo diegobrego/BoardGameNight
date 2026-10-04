@@ -27,5 +27,9 @@ export const MIN_PLAYERS_FOR_IDEAS = 1;
 // How many days the calendar shows, starting today.
 export const DAYS_AHEAD = 14;
 
+// How many days before today stay available in the "Last week" preview, so a game night that
+// nobody logged on the day can still be logged.
+export const DAYS_BEHIND = 7;
+
 // The public address of the site. The WhatsApp messages the admin sends link to it.
 export const SITE_URL = 'https://diegobrego.github.io/BoardGameNight/';

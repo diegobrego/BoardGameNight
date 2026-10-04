@@ -16,6 +16,8 @@ const ICONS = {
     + 'd="M12 2.8l2.8 5.9 6.4.9-4.7 4.5 1.2 6.4L12 17.4l-5.7 3.1 1.2-6.4-4.7-4.5 6.4-.9z"/>',
   bell: `<path ${LINE} stroke-width="2.6" d="M6.2 9a5.8 5.8 0 0 1 11.6 0c0 6.4 2.7 8.2 2.7 8.2h-17S6.2 15.4 6.2 9z"/>`
     + `<path ${LINE} stroke-width="2.6" d="M10.2 20.8a2 2 0 0 0 3.6 0"/>`,
+  flag: `<path ${LINE} stroke-width="2.4" d="M5.5 21V3.5"/>`
+    + `<path ${LINE} stroke-width="2.4" d="M5.5 4.5h12.5l-2.4 4 2.4 4H5.5"/>`,
   chevron: `<path ${LINE} stroke-width="2.8" d="M6 9l6 6 6-6"/>`,
   pin: `<path ${LINE} stroke-width="2.4" d="M12 21s-6.5-5.7-6.5-11a6.5 6.5 0 1 1 13 0c0 5.3-6.5 11-6.5 11z"/>`
     + '<circle fill="currentColor" cx="12" cy="10" r="2.2"/>',
@@ -38,6 +40,10 @@ const ICONS = {
   dice: `<rect ${LINE} stroke-width="2.4" x="3.5" y="3.5" width="17" height="17" rx="4"/>`
     + '<g fill="currentColor"><circle cx="8.3" cy="8.3" r="1.5"/><circle cx="15.7" cy="8.3" r="1.5"/>'
     + '<circle cx="12" cy="12" r="1.5"/><circle cx="8.3" cy="15.7" r="1.5"/><circle cx="15.7" cy="15.7" r="1.5"/></g>',
+  lock: `<rect ${LINE} stroke-width="2.4" x="4.8" y="10.5" width="14.4" height="10" rx="2.6"/>`
+    + `<path ${LINE} stroke-width="2.4" d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>`,
+  unlock: `<rect ${LINE} stroke-width="2.4" x="4.8" y="10.5" width="14.4" height="10" rx="2.6"/>`
+    + `<path ${LINE} stroke-width="2.4" d="M8 10.5V8a4 4 0 0 1 7.6-1.7"/>`,
   meeple: `<g fill="currentColor"><circle cx="12" cy="5.4" r="3.2"/><path d="${MEEPLE_HALF}"/>`
     + `<path transform="matrix(-1 0 0 1 24 0)" d="${MEEPLE_HALF}"/></g>`,
 };

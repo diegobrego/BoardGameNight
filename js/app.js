@@ -1,10 +1,11 @@
-import { MIN_PLAYERS, MIN_PLAYERS_FOR_IDEAS, DAYS_AHEAD, SITE_URL } from './config.js';
+import { MIN_PLAYERS, MIN_PLAYERS_FOR_IDEAS, DAYS_AHEAD, DAYS_BEHIND, SITE_URL } from './config.js';
 import { createStore, isForcedDemo } from './store.js';
 import { avatar, randomSeed, hueOf } from './avatar.js';
 import { icon, iconInner } from './icons.js';
-import { upcomingDays, longLabel, rangeLabel } from './dates.js';
+import { upcomingDays, pastDays, longLabel, rangeLabel } from './dates.js';
 import { buildIcs } from './ics.js';
-import { tally, ranked as rankList, newestFirst } from './hall.js';
+import { tally, ranked as rankList, newestFirst, playerStats, awardTitles } from './hall.js';
+import { sessionsOf, plannedOn, campaignRecord, sortCampaigns, defaultTitle, can, outsiders } from './campaigns.js';
 import {
   loadGames, isLoaded, findGame, searchGames, bggUrl, bggSearchUrl, parseBggLink, titleFromSlug, voteKey,
 } from './games.js';
@@ -66,15 +67,21 @@ darkQuery?.addEventListener?.('change', () => {
   if (!ls.get(THEME_KEY)) applyTheme(preferredTheme(), false);
 });
 
-// Which hall-of-fame lists the visitor has collapsed, remembered on this device.
-const FOLD_KEY = 'bgn.hall.folded';
-function loadFolded() {
-  try { return new Set(JSON.parse(ls.get(FOLD_KEY) ?? '[]')); } catch { return new Set(); }
+// Which collapsible lists are open or closed, remembered on this device: { [id]: true | false }.
+// A list nobody has touched is open or closed according to its own default.
+const FOLDS_KEY = 'bgn.folds';
+function loadFolds() {
+  try { return JSON.parse(ls.get(FOLDS_KEY) ?? '{}') ?? {}; } catch { return {}; }
 }
+const isOpen = (id, openByDefault = true) => state.folds[id] ?? openByDefault;
+
+const viewFromHash = () => (
+  location.hash === '#hall' ? 'hall' : location.hash === '#campaigns' ? 'campaigns' : 'calendar'
+);
 
 const state = {
   store: null,
-  folded: loadFolded(),      // ids of collapsed hall-of-fame lists: 'wins' | 'nights' | 'plays'
+  folds: loadFolds(),        // open/closed lists, by id ('wins', 'nights', 'plays', 'lastweek', 'sessions-<id>'...)
   ready: false,              // first data has arrived
   players: {},               // id -> { id, name, avatar }
   days: {},                  // YYYY-MM-DD -> { players: [id], games: [...] }
@@ -83,13 +90,21 @@ const state = {
   admin: { canSignIn: false, signedIn: false, checking: false, isAdmin: false, uid: null },
   adminAsked: false,         // the visitor just pressed "Admin sign-in"
   onConfirm: null,           // what the confirm dialog's yes-button does
-  daysList: [],              // the visible calendar days
-  view: location.hash === '#hall' ? 'hall' : 'calendar',   // which page: 'calendar' | 'hall'
+  daysList: [],              // the visible calendar days: today and the next two weeks
+  pastDays: [],              // the week before today, for the "Last week" preview
+  futureKeys: new Set(),     // keys of daysList, so we know which days can still be edited
+  view: viewFromHash(),      // which page: 'calendar' | 'campaigns' | 'hall'
+  campaigns: [],             // long games played over several sessions
+  campaignsReady: false,
+  campaignsError: false,     // campaigns couldn't be loaded (e.g. rules not updated yet)
   plays: [],                 // the hall of fame: one entry per game played
   playsReady: false,
   playsError: false,         // the hall of fame couldn't be loaded (e.g. rules not updated yet)
   installPrompt: null,       // the browser's "install this app" prompt, once it offers one
   log: null,                 // state of the "Log game night" popup
+  start: null,               // state of the "Start a campaign" popup
+  finish: null,              // state of the "Finish campaign" popup
+  addPeople: null,           // state of the "Add players" popup of a campaign
   mode: 'view',              // 'view' | 'pick'
   draft: new Set(),          // day keys selected while picking
   saving: false,
@@ -109,7 +124,8 @@ const savedMine = (key) => !!state.me && savedIds(key).includes(state.me);
 // Who counts as available on a day, including my not-yet-saved picks while in pick mode.
 function peopleOn(key) {
   let ids = savedIds(key);
-  if (state.mode === 'pick' && state.me) {
+  // picks only apply to days that can still be edited, never to last week's
+  if (state.mode === 'pick' && state.me && state.futureKeys.has(key)) {
     const has = ids.includes(state.me);
     const wants = state.draft.has(key);
     if (wants && !has) ids = [...ids, state.me];
@@ -119,6 +135,15 @@ function peopleOn(key) {
 }
 
 const changeCount = () => state.daysList.filter((d) => state.draft.has(d.key) !== savedMine(d.key)).length;
+
+// Any day we show: the next two weeks, or last week.
+const dayByKey = (key) => state.daysList.find((d) => d.key === key) ?? state.pastDays.find((d) => d.key === key);
+
+// Game nights that happened (3+ available) but were never logged in the hall of fame.
+const loggedDates = () => new Set(state.plays.map((p) => p.date));
+const unloggedNights = () => state.pastDays.filter(
+  (d) => savedIds(d.key).length >= MIN_PLAYERS && !loggedDates().has(d.key),
+);
 
 // A day's games, most votes first (ties keep the order they were added). Only votes from
 // players who are available that day count: a vote from someone who is no longer
@@ -208,7 +233,9 @@ function showBanner(html) {
 function renderStatic() {
   $('#brand-icon').innerHTML = icon('meeple', 3);
   $('#tab-calendar').innerHTML = `${icon('calendar', 2)}<span>Calendar</span>`;
+  $('#tab-campaigns').innerHTML = `${icon('flag', 2)}<span>Campaigns</span>`;
   $('#tab-hall').innerHTML = `${icon('trophy', 2)}<span>Hall of fame</span>`;
+  $('#campaigns-title').innerHTML = `${icon('flag', 3)}<span>Campaigns</span>`;
   $('#hall-title').innerHTML = `${icon('trophy', 3)}<span>Hall of fame</span>`;
   applyTheme(preferredTheme(), false);   // also catches a device change that landed after the inline script ran
   const favicon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" rx="5" fill="#6d28d9"/><g color="#fff" transform="translate(2.4 2.4) scale(.8)">${iconInner('meeple')}</g></svg>`;
@@ -220,6 +247,9 @@ function renderStatic() {
 }
 
 const isSharedAdmin = () => state.store?.mode === 'firebase' && state.admin.isAdmin;
+
+// What I may do with a campaign (join, log, lock, finish...). See js/campaigns.js.
+const myRights = (c) => can(c, state.me, { admin: isSharedAdmin() });
 
 function renderHeader() {
   const me = state.players[state.me];
@@ -277,18 +307,20 @@ function renderToolbar() {
 function dayTile(d) {
   const ids = peopleOn(d.key);
   const go = ids.length >= MIN_PLAYERS;
-  const picking = state.mode === 'pick';
+  const picking = state.mode === 'pick' && !d.isPast;   // last week can't be picked
   const mine = !!state.me && ids.includes(state.me);
   const changed = picking && state.draft.has(d.key) !== savedMine(d.key);
+  const campaigns = plannedOn(state.campaigns, d.key);
+  const logged = d.isPast && loggedDates().has(d.key);
   const cls = [
-    'day', mine && 'is-mine', go && 'is-go', d.isWeekend && 'is-weekend',
+    'day', mine && 'is-mine', go && 'is-go', d.isWeekend && 'is-weekend', d.isPast && 'is-past',
     d.isToday && 'is-today', changed && 'is-changed', !ids.length && 'is-empty',
   ].filter(Boolean).join(' ');
-  const label = `${longLabel(d.date)}: ${plural(ids.length, 'player')} available${go ? ', game on' : ''}${mine ? ', including you' : ''}`;
+  const label = `${longLabel(d.date)}: ${plural(ids.length, 'player')} available${go ? (d.isPast ? ', was a game night' : ', game on') : ''}${mine ? ', including you' : ''}${campaigns.length ? `, campaign session: ${campaigns.map((c) => c.title).join(', ')}` : ''}${d.isPast && go ? (logged ? ', logged' : ', not logged yet') : ''}`;
   const faces = ids.map((id) => avatar(state.players[id].avatar, 22, state.players[id].name)).join('');
   const sub = d.isToday ? 'Today' : d.num === 1 ? d.month : '';
   return `
-    <button type="button" class="${cls}" data-action="day" data-date="${d.key}" aria-label="${esc(label)}"${picking ? ` aria-pressed="${mine}"` : ''}>
+    <button type="button" class="${cls}" data-action="${d.isPast ? 'open-day' : 'day'}" data-date="${d.key}" aria-label="${esc(label)}"${picking ? ` aria-pressed="${mine}"` : ''}>
       <span class="day-date">
         <span class="day-dow">${d.dow}</span>
         <span class="day-num">${d.num}</span>
@@ -297,10 +329,30 @@ function dayTile(d) {
       <span class="day-people">${faces}</span>
       <span class="day-status">
         <span class="day-count">${ids.length} available</span>
-        ${go ? `<span class="day-flag">${icon('star', 2)}<span>Game on</span></span>` : ''}
+        ${go && !d.isPast ? `<span class="day-flag">${icon('star', 2)}<span>Game on</span></span>` : ''}
+        ${d.isPast && go ? `<span class="day-log ${logged ? 'is-done' : 'is-todo'}">${icon(logged ? 'check' : 'trophy', 2)}<span>${logged ? 'Logged' : 'Not logged'}</span></span>` : ''}
+        ${campaigns.length ? `<span class="day-campaign">${icon('flag', 2)}<span>Campaign</span></span>` : ''}
         ${picking ? `<span class="day-check">${mine ? icon('check', 2) : ''}</span>` : ''}
       </span>
     </button>`;
+}
+
+// The week before today, collapsed by default. It stays so a game night nobody logged on the
+// day itself can still be logged afterwards; it opens by itself while there is one to log.
+function renderLastWeek() {
+  const el = $('#lastweek');
+  if (!state.ready || !state.pastDays.length) {
+    el.innerHTML = '';
+    return;
+  }
+  const todo = unloggedNights().length;
+  const focused = el.contains(document.activeElement) ? document.activeElement.dataset.date : null;
+  el.innerHTML = fold('lastweek', 'Last week', {
+    count: todo ? `${todo} to log` : '',
+    open: todo > 0,
+    body: `<div class="calendar">${state.pastDays.map(dayTile).join('')}</div>`,
+  });
+  if (focused) $(`[data-date="${focused}"]`, el)?.focus({ preventScroll: true });
 }
 
 function renderCalendar() {
@@ -327,7 +379,7 @@ function renderCrew() {
     ${admin && list.length ? '<p class="muted crew-hint">Admin: tap the X to remove someone from the crew and from all their days.</p>' : ''}
     ${list.length
     ? `<ul class="crew-list">${list.map((p) => `
-        <li class="crew-item${p.id === state.me ? ' is-me' : ''}" style="--h:${hueOf(p.avatar)}">${avatar(p.avatar, 28)}<span>${esc(p.name)}${p.id === state.me ? ' <em>(you)</em>' : ''}</span>${
+        <li class="crew-item${p.id === state.me ? ' is-me' : ''}" style="--h:${hueOf(p.avatar)}"><button type="button" class="pill-btn" data-action="player-card" data-id="${esc(p.id)}" title="Show ${esc(p.name)}'s card">${avatar(p.avatar, 28)}<span>${esc(p.name)}${p.id === state.me ? ' <em>(you)</em>' : ''}</span></button>${
   admin ? `<button type="button" class="crew-del" data-action="delete-player" data-id="${esc(p.id)}" aria-label="Remove ${esc(p.name)}">${icon('x', 2)}</button>` : ''}</li>`).join('')}</ul>`
     : '<p class="muted">Nobody has joined yet. Be the first!</p>'}`;
 }
@@ -341,45 +393,92 @@ function whatsappButton(day, extraClass = '') {
   return `<a class="btn ${extraClass}" href="${esc(link)}" target="_blank" rel="noopener noreferrer" title="Opens WhatsApp with a ready-made message">${soon ? 'Remind the group' : 'Tell the group'} ${icon('arrow', 2)}</a>`;
 }
 
-// The orange banner: shown to everyone when today or tomorrow has enough players available.
+// The orange banners, for today and tomorrow (calendar page only):
+//  - a game night: shown to everyone when the day has enough players available
+//  - a campaign session: shown to the people in that campaign, when its next day is planned
+//    for today or tomorrow
 function renderReminder() {
   const el = $('#reminder');
-  const soon = state.ready && state.view === 'calendar'
-    ? state.daysList.slice(0, 2).filter((d) => savedIds(d.key).length >= MIN_PLAYERS)
-    : [];
-  el.hidden = !soon.length;
-  el.innerHTML = soon.map((d) => {
-    const ids = savedIds(d.key).sort(byName);
-    const pick = topPickLine(d.key);
-    const where = detailsLine(d.key);
-    return `
-      <div class="reminder-item">
-        <span class="reminder-icon">${icon('bell', 3)}</span>
-        <p class="reminder-text">
-          <strong>Game night ${d.isToday ? 'today' : 'tomorrow'}!</strong>
-          ${esc(longLabel(d.date))}. ${esc(listNames(ids))} ${ids.length === 1 ? 'is' : 'are'} available${savedMine(d.key) ? " (you're in)" : ''}.${where ? ` Where: ${esc(where)}.` : ''}${pick ? ` ${esc(pick)}.` : ''}
-        </p>
-        <span class="reminder-actions">
-          <button type="button" class="btn btn--small" data-action="open-day" data-date="${d.key}">See the day</button>
-          ${state.admin.isAdmin ? whatsappButton(d, 'btn--small') : ''}
-        </span>
-      </div>`;
-  }).join('');
+  const days = state.ready && state.view === 'calendar' ? state.daysList.slice(0, 2) : [];
+  const items = [];
+  for (const d of days) {
+    if (savedIds(d.key).length >= MIN_PLAYERS) items.push(gameNightBanner(d));
+    for (const c of plannedOn(state.campaigns, d.key)) {
+      if (state.me && c.players.includes(state.me)) items.push(campaignBanner(d, c));
+    }
+  }
+  el.hidden = !items.length;
+  el.innerHTML = items.join('');
+}
+
+const whenWord = (d) => (d.isToday ? 'today' : 'tomorrow');
+
+// The banners are one short line each: when, the upcoming game, and a link to it (the game
+// night's day, or the campaign). Everything else is one tap away.
+const bannerLink = (action, attrs, label) => `<button type="button" class="reminder-link" data-action="${action}" ${attrs}>${label}${icon('arrow', 2)}</button>`;
+
+function gameNightBanner(d) {
+  const { ranked, topVotes } = rankGames(d.key);
+  const leaders = ranked.filter((r) => topVotes && r.voters.length === topVotes);
+  const game = leaders.length === 1 ? leaders[0].g.name : leaders.length ? 'game still tied' : 'no game picked yet';
+  return `
+    <div class="reminder-item">
+      <span class="reminder-icon">${icon('bell', 2)}</span>
+      <p class="reminder-text"><strong>Game night ${whenWord(d)}</strong><span>${esc(game)}</span></p>
+      <span class="reminder-actions">
+        ${bannerLink('open-day', `data-date="${d.key}"`, 'See the game night')}
+        ${state.admin.isAdmin ? whatsappButton(d, 'btn--small') : ''}
+      </span>
+    </div>`;
+}
+
+function campaignBanner(d, c) {
+  const session = state.playsReady ? ` · session ${sessionsOf(state.plays, c.id).length + 1}` : '';
+  return `
+    <div class="reminder-item">
+      <span class="reminder-icon">${icon('flag', 2)}</span>
+      <p class="reminder-text"><strong>Campaign ${whenWord(d)}</strong><span>${esc(c.title)}${session}</span></p>
+      <span class="reminder-actions">
+        ${bannerLink('open-campaign', `data-id="${esc(c.id)}"`, 'See the campaign')}
+      </span>
+    </div>`;
+}
+
+// Takes you to the campaign on the Campaigns page, with the running list opened.
+function showCampaign(id) {
+  state.folds['running-campaigns'] = true;
+  ls.set(FOLDS_KEY, JSON.stringify(state.folds));
+  if (location.hash === '#campaigns') renderAll();
+  else location.hash = '#campaigns';
+  setTimeout(() => document.getElementById(`campaign-${id}`)?.scrollIntoView({ block: 'start' }), 60);
 }
 
 // ---------------------------------------------------------------------------
 // hall of fame
 // ---------------------------------------------------------------------------
 
-const nameFromPlays = (id) => state.plays.find((p) => p.names?.[id])?.names[id] ?? 'Former player';
-const playerName = (id) => state.players[id]?.name ?? nameFromPlays(id);
+// Someone who has left the crew is still shown by the name they had: logged games and
+// campaigns keep a snapshot of the names.
+const nameFromHistory = (id) => state.plays.find((p) => p.names?.[id])?.names[id]
+  ?? state.campaigns.find((c) => c.names?.[id])?.names[id]
+  ?? 'Former player';
+const playerName = (id) => state.players[id]?.name ?? nameFromHistory(id);
 
-// A player as a tinted pill. Someone who has since left the crew shows as plain text.
+// A player as a tinted pill; tap it for their card. Someone who has since left the crew
+// shows as plain text.
 function playerPill(id) {
   const p = state.players[id];
   return p
-    ? `<span class="pill" style="--h:${hueOf(p.avatar)}">${avatar(p.avatar, 24, p.name)}<span>${esc(p.name)}</span></span>`
+    ? `<button type="button" class="pill" style="--h:${hueOf(p.avatar)}" data-action="player-card" data-id="${esc(id)}" title="Show ${esc(p.name)}'s card">${avatar(p.avatar, 24, p.name)}<span>${esc(p.name)}</span></button>`
     : `<span class="pill is-gone"><span>${esc(playerName(id))}</span><em>(left)</em></span>`;
+}
+
+// "Campaign: Arcs: the long game · session 2", for a play that belongs to a campaign.
+function campaignTag(play) {
+  if (!play.campaign) return '';
+  const campaign = state.campaigns.find((c) => c.id === play.campaign);
+  const session = sessionsOf(state.plays, play.campaign).findIndex((s) => s.id === play.id) + 1;
+  return `<span class="campaign-tag">${icon('flag', 2)}<span>${campaign ? esc(campaign.title) : 'Campaign'}${session ? ` · session ${session}` : ''}</span></span>`;
 }
 
 function dateLabel(key) {   // "Fri 9 Oct 2026"
@@ -411,8 +510,10 @@ function playRow(p) {
         <span class="game-name">${esc(g.name)}</span>${g.year ? `<span class="game-year">${g.year}</span>` : ''}${icon('arrow', 2)}
         <span class="sr-only">(opens BoardGameGeek)</span>
       </a>
+      ${p.campaign ? `<div>${campaignTag(p)}</div>` : ''}
       <div class="play-line"><span class="play-label">Winner</span>${p.winner ? playerPill(p.winner) : '<span class="muted">Nobody (co-op or draw)</span>'}</div>
       <div class="play-line"><span class="play-label">Played by</span><span class="play-faces">${faces}</span><span class="muted">${plural(p.players.length, 'player')}</span></div>
+      ${p.note ? `<p class="play-note">${esc(p.note)}</p>` : ''}
     </li>`;
 }
 
@@ -450,16 +551,18 @@ function renderHall() {
 }
 
 // A list the visitor can collapse. `preview` is what stays visible while it is collapsed.
-function fold(id, title, { count, preview = '', body }) {
-  const open = !state.folded.has(id);
+// `open` is whether it starts open (until the visitor toggles it); `count` is the little badge.
+function fold(id, title, { count, preview = '', body, open: openByDefault = true }) {
+  const open = isOpen(id, openByDefault);
+  const badge = count === undefined || count === '' ? '' : ` <span class="count">${esc(count)}</span>`;
   return `
     <section class="fold${open ? '' : ' is-collapsed'}">
-      <button type="button" class="fold-head" data-action="toggle-fold" data-fold="${id}" aria-expanded="${open}" aria-controls="fold-${id}">
-        <span class="h-small">${esc(title)} <span class="count">${count}</span></span>
+      <button type="button" class="fold-head" data-action="toggle-fold" data-fold="${esc(id)}" data-default="${openByDefault ? 1 : 0}" aria-expanded="${open}" aria-controls="fold-${esc(id)}">
+        <span class="h-small">${esc(title)}${badge}</span>
         ${icon('chevron', 2)}
       </button>
       ${open ? '' : preview}
-      <div id="fold-${id}" class="fold-body"${open ? '' : ' hidden'}>${body}</div>
+      <div id="fold-${esc(id)}" class="fold-body"${open ? '' : ' hidden'}>${body}</div>
     </section>`;
 }
 
@@ -471,21 +574,21 @@ function leaderPreview(rows, unit) {
     leaders.length > 1 ? `<p class="muted fold-note">+${leaders.length - 1} more tied for first</p>` : ''}</div>`;
 }
 
-// Which page is showing. The hall of fame has its own gold look, set by data-page.
+// Which page is showing. Each page has its own colours (purple, teal, gold), set by data-page.
 function renderView() {
-  const hall = state.view === 'hall';
-  document.documentElement.dataset.page = hall ? 'hall' : 'calendar';
-  $('#view-calendar').hidden = hall;
-  $('#view-hall').hidden = !hall;
-  for (const [id, active] of [['#tab-calendar', !hall], ['#tab-hall', hall]]) {
-    if (active) $(id).setAttribute('aria-current', 'page');
-    else $(id).removeAttribute('aria-current');
+  const view = state.view;
+  document.documentElement.dataset.page = view;
+  for (const page of ['calendar', 'campaigns', 'hall']) {
+    $(`#view-${page}`).hidden = page !== view;
+    const tab = $(`#tab-${page}`);
+    if (page === view) tab.setAttribute('aria-current', 'page');
+    else tab.removeAttribute('aria-current');
   }
   syncThemeColor();
 }
 
 window.addEventListener('hashchange', () => {
-  state.view = location.hash === '#hall' ? 'hall' : 'calendar';
+  state.view = viewFromHash();
   window.scrollTo(0, 0);
   renderAll();
 });
@@ -497,7 +600,9 @@ function renderAll() {
   renderFooter();
   renderToolbar();
   renderCalendar();
+  renderLastWeek();
   renderCrew();
+  renderCampaigns();
   renderHall();
   renderDayPanel();
 }
@@ -555,6 +660,7 @@ function openDay(key) {
     </div>
     <div class="sheet-body">
       <section id="dp-who" class="block"></section>
+      <section id="dp-campaign" class="block"></section>
       <section id="dp-details" class="block"></section>
       <section id="dp-games" class="block">
         <div id="dp-games-head"></div>
@@ -577,42 +683,65 @@ function openDay(key) {
 function renderDayPanel() {
   const key = state.openKey;
   if (!key || !$('#dp-title')) return;
-  const day = state.daysList.find((d) => d.key === key);
+  const day = dayByKey(key);
   if (!day) return;
   const ids = savedIds(key).sort(byName);
   const go = ids.length >= MIN_PLAYERS;                         // a real game night: green, "Game on"
   const canSuggest = ids.length >= MIN_PLAYERS_FOR_IDEAS;       // ideas can be added and voted on
   const mine = savedMine(key);
+  const past = day.isPast;                                      // last week: you can look, and log what was played
+  const canAct = mine && !past;                                 // vote, bring, edit the details
   const games = state.days[key]?.games ?? [];
+  const lockedTitle = past ? 'This day has passed' : 'Only players who are available this day can do this';
 
-  $('#dp-title').innerHTML = `${esc(longLabel(day.date))}${go ? `<span class="day-flag">${icon('star', 2)}<span>Game on</span></span>` : ''}`;
+  $('#dp-title').innerHTML = `${esc(longLabel(day.date))}${go ? `<span class="day-flag">${icon('star', 2)}<span>${past ? 'Was a game night' : 'Game on'}</span></span>` : ''}`;
 
   $('#dp-who').innerHTML = `
     <h3 class="h-small">Who's available <span class="count">${ids.length}</span></h3>
     ${ids.length
-    ? `<ul class="people">${ids.map((id) => `<li style="--h:${hueOf(state.players[id].avatar)}">${avatar(state.players[id].avatar, 32)}<span>${esc(state.players[id].name)}${id === state.me ? ' <em>(you)</em>' : ''}</span></li>`).join('')}</ul>`
-    : '<p class="muted">Nobody yet.</p>'}
-    <button type="button" class="btn${mine ? '' : ' btn--solid'}" data-action="toggle-me">${mine ? "I can't make it" : "I'm available this day"}</button>
-    ${state.admin.isAdmin && go ? whatsappButton(day) : ''}`;
+    ? `<ul class="people">${ids.map((id) => `<li style="--h:${hueOf(state.players[id].avatar)}"><button type="button" class="pill-btn" data-action="player-card" data-id="${esc(id)}" title="Show ${esc(state.players[id].name)}'s card">${avatar(state.players[id].avatar, 32)}<span>${esc(state.players[id].name)}${id === state.me ? ' <em>(you)</em>' : ''}</span></button></li>`).join('')}</ul>`
+    : `<p class="muted">${past ? 'Nobody was available.' : 'Nobody yet.'}</p>`}
+    ${past ? '' : `<button type="button" class="btn${mine ? '' : ' btn--solid'}" data-action="toggle-me">${mine ? "I can't make it" : "I'm available this day"}</button>`}
+    ${state.admin.isAdmin && go && !past ? whatsappButton(day) : ''}`;
 
-  // Where and when, adding it to a calendar, and (today only) logging what was played.
+  // A campaign session planned for this day (see the Campaigns tab).
+  const planned = plannedOn(state.campaigns, key);
+  $('#dp-campaign').hidden = !planned.length;
+  $('#dp-campaign').innerHTML = planned.map((c) => `
+    <div class="campaign-plan">
+      <span class="campaign-plan-icon">${icon('flag', 2)}</span>
+      <div class="campaign-plan-text">
+        <strong>Campaign session: ${esc(c.title)}</strong>
+        <span class="muted">${esc(c.game.name)} · session ${sessionsOf(state.plays, c.id).length + 1}</span>
+      </div>
+      ${(day.isToday || past) && myRights(c).log ? `<button type="button" class="btn btn--small" data-action="log-session" data-campaign="${esc(c.id)}" data-date="${esc(key)}">Log session</button>` : ''}
+    </div>`).join('');
+
+  // Where and when, adding it to a calendar, and logging what was played (today and last week).
   const { place = '', time = '' } = state.days[key]?.details ?? {};
   const hasDetails = !!(place || time);
   const showDetails = go || hasDetails;
+  const canLog = day.isToday || past;
+  const loggedHere = canLog ? state.plays.filter((p) => p.date === key) : [];
   const dayButtons = [
-    go ? `<button type="button" class="btn" data-action="add-to-calendar">${icon('calendar', 2)} Add to calendar</button>` : '',
-    day.isToday ? `<button type="button" class="btn btn--solid" data-action="log-game-night">${icon('trophy', 2)} Log game night</button>` : '',
+    go && !past ? `<button type="button" class="btn" data-action="add-to-calendar">${icon('calendar', 2)} Add to calendar</button>` : '',
+    canLog ? `<button type="button" class="btn btn--solid" data-action="log-game-night">${icon('trophy', 2)} Log game night</button>` : '',
   ].join('');
-  $('#dp-details').hidden = !showDetails && !dayButtons;
+  $('#dp-details').hidden = !showDetails && !dayButtons && !loggedHere.length;
   $('#dp-details').innerHTML = `
     ${showDetails ? `
       <div class="head-row">
         <h3 class="h-small">Game night</h3>
-        ${mine ? `<button type="button" class="btn btn--small" data-action="edit-details">${hasDetails ? 'Edit' : 'Add location &amp; time'}</button>` : ''}
+        ${canAct ? `<button type="button" class="btn btn--small" data-action="edit-details">${hasDetails ? 'Edit' : 'Add location &amp; time'}</button>` : ''}
       </div>
       ${hasDetails
     ? `<ul class="details">${place ? `<li>${icon('pin', 2)}<span>${esc(place)}</span></li>` : ''}${time ? `<li>${icon('clock', 2)}<span>${esc(time)}</span></li>` : ''}</ul>`
     : '<p class="muted">No location yet.</p>'}` : ''}
+    ${loggedHere.length ? `
+      <div>
+        <h3 class="h-small">Logged</h3>
+        <ul class="logged">${loggedHere.map((p) => `<li>${icon('check', 2)}<span>${esc(p.game.name)}${p.winner ? ` · ${esc(playerName(p.winner))} won` : ''}</span></li>`).join('')}</ul>
+      </div>` : ''}
     ${dayButtons ? `<div class="actions">${dayButtons}</div>` : ''}`;
 
   // The rules of the game ("how many players make a game night", who can vote) live behind
@@ -622,7 +751,7 @@ function renderDayPanel() {
       <h3 class="h-small">Game options <span class="count">${games.length}</span></h3>
       <button type="button" class="icon-btn icon-btn--small" data-action="game-night-info" aria-label="How game nights work" title="How game nights work">${icon('help', 2)}</button>
     </div>
-    ${canSuggest ? '' : '<p class="muted">Ideas open up once someone is available.</p>'}`;
+    ${canSuggest || past ? '' : '<p class="muted">Ideas open up once someone is available.</p>'}`;
 
   const { ranked, topVotes } = rankGames(key);
 
@@ -633,9 +762,10 @@ function renderDayPanel() {
       const voted = !!state.me && voters.includes(state.me);
       const bringing = !!state.me && bringers.includes(state.me);
       const top = ranked.length > 1 && topVotes > 0 && voters.length === topVotes;
+      const locked = canAct ? '' : ` aria-disabled="true" title="${lockedTitle}"`;
       return `
         <li class="game${top ? ' is-top' : ''}">
-          <button type="button" class="vote${voted ? ' is-on' : ''}${mine ? '' : ' is-locked'}" data-action="vote" data-gk="${esc(k)}" aria-pressed="${voted}"${mine ? '' : ' aria-disabled="true" title="Only players who are available this day can vote"'}
+          <button type="button" class="vote${voted ? ' is-on' : ''}${canAct ? '' : ' is-locked'}" data-action="vote" data-gk="${esc(k)}" aria-pressed="${voted}"${locked}
             aria-label="${voted ? 'Take back your vote for' : 'Vote for'} ${esc(g.name)} (${plural(voters.length, 'vote')} so far)">
             ${icon('up', 2)}<span>${voters.length}</span>
           </button>
@@ -647,24 +777,25 @@ function renderDayPanel() {
             ${top ? `<span class="top-pick">${icon('star', 2)}<span>Top pick</span></span>` : ''}
             ${voters.length ? `<span class="game-voters"><span class="sr-only">Votes from:</span>${voters.map((id) => avatar(state.players[id].avatar, 20, state.players[id].name)).join('')}</span>` : ''}
             <div class="game-actions">
-              <button type="button" class="bring${bringing ? ' is-on' : ''}${mine ? '' : ' is-locked'}" data-action="bring" data-gk="${esc(k)}" aria-pressed="${bringing}"${mine ? '' : ' aria-disabled="true" title="Only players who are available this day can bring a game"'}>
+              <button type="button" class="bring${bringing ? ' is-on' : ''}${canAct ? '' : ' is-locked'}" data-action="bring" data-gk="${esc(k)}" aria-pressed="${bringing}"${locked}>
                 ${icon('box', 2)}<span>${bringing ? "I'm bringing it" : "I'll bring it"}</span>
               </button>
               ${bringers.length ? `<span class="game-brings">Brought by ${esc(listNames(bringers))}</span>` : ''}
             </div>
             ${by ? `<span class="game-by">added by ${avatar(by.avatar, 18)} ${esc(by.name)}</span>` : ''}
           </div>
-          ${g.by === state.me || state.admin.isAdmin ? `<button type="button" class="icon-btn" data-action="remove-game" data-gk="${esc(k)}" aria-label="Remove ${esc(g.name)}">${icon('x', 2)}</button>` : ''}
+          ${(g.by === state.me && !past) || state.admin.isAdmin ? `<button type="button" class="icon-btn" data-action="remove-game" data-gk="${esc(k)}" aria-label="Remove ${esc(g.name)}">${icon('x', 2)}</button>` : ''}
         </li>`;
     }).join('')
-    : canSuggest ? '<li class="muted">No games yet. Add the first one!</li>' : '';
+    : canSuggest && !past ? '<li class="muted">No games yet. Add the first one!</li>' : '';
 
-  $('#dp-add').hidden = !canSuggest;
+  $('#dp-add').hidden = !canSuggest || past;
 }
 
 async function toggleMe() {
   if (!state.me) return openWho('choose');
   const key = state.openKey;
+  if (dayByKey(key)?.isPast) return toast('That day has passed.');
   const mine = savedMine(key);
   try {
     await state.store.setAvailability(state.me, mine ? [] : [key], mine ? [key] : []);
@@ -676,6 +807,7 @@ async function toggleMe() {
 
 function openAdder() {
   if (!state.me) return openWho('choose');
+  if (dayByKey(state.openKey)?.isPast) return toast('That day has passed.');
   $('#dp-add-open').hidden = true;
   $('#dp-add-form').hidden = false;
   $('#game-q').focus();
@@ -763,6 +895,7 @@ async function removeGame(el) {
 async function vote(el) {
   if (!state.me) return openWho('choose');
   const key = state.openKey;
+  if (dayByKey(key)?.isPast) return toast('That day has passed.');
   // Votes decide who plays, so only players who are available that day can cast one.
   if (!savedMine(key)) {
     toast('Mark yourself available this day to vote.');
@@ -782,6 +915,7 @@ async function vote(el) {
 async function bring(el) {
   if (!state.me) return openWho('choose');
   const key = state.openKey;
+  if (dayByKey(key)?.isPast) return toast('That day has passed.');
   if (!savedMine(key)) {
     toast('Mark yourself available this day to bring a game.');
     return;
@@ -802,6 +936,7 @@ async function bring(el) {
 function openDetails() {
   if (!state.me) return openWho('choose');
   const key = state.openKey;
+  if (dayByKey(key)?.isPast) return toast('That day has passed.');
   const { place = '', time = '' } = state.days[key]?.details ?? {};
   $('#details-dialog').innerHTML = `
     <div class="sheet-head"><h2>Game night details</h2>${closeBtn()}</div>
@@ -839,7 +974,7 @@ async function submitDetails(form) {
 
 // Downloads an .ics file; opening it adds the game night to the phone's or computer's calendar.
 function addToCalendar() {
-  const day = state.daysList.find((d) => d.key === state.openKey);
+  const day = dayByKey(state.openKey);
   if (!day) return;
   const { place = '', time = '' } = state.days[day.key]?.details ?? {};
   const description = [
@@ -875,53 +1010,125 @@ function rerender(el, html) {
 const choice = (attrs, on, inner, cls = '') => `<button type="button" class="choice ${cls}" aria-pressed="${on}" ${attrs}>${on ? icon('check', 2) : ''}${inner}</button>`;
 const sameGame = (a, b) => !!a && !!b && voteKey(a) === voteKey(b);
 
-function openLog(key) {
+// `campaignId`: log it as a session of that campaign. `dateEditable`: let the date be chosen
+// (when it's opened from the Campaigns tab rather than from a day).
+function openLog(key, { campaignId = null, dateEditable = false } = {}) {
   if (!state.me) return openWho('choose');
-  const day = state.daysList.find((d) => d.key === key);
   const { ranked: ideas, topVotes } = rankGames(key);
   const leaders = ideas.filter((r) => r.voters.length === topVotes);
   const asGame = (g) => ({ id: g.id ?? null, name: g.name, year: g.year || 0 });
+  // only campaigns I'm in: anyone in a campaign can log its sessions
+  const campaigns = sortCampaigns(state.campaigns).active.filter((c) => myRights(c).log);
   state.log = {
     date: key,
+    dateEditable,
     ideas: ideas.map(({ g }) => asGame(g)),
     // if one game clearly won the vote, start with it selected
     game: topVotes > 0 && leaders.length === 1 ? asGame(leaders[0].g) : null,
+    defaultGame: topVotes > 0 && leaders.length === 1 ? asGame(leaders[0].g) : null,
+    defaultPlayers: [...savedIds(key)],
     players: new Set(savedIds(key)),   // everyone who was available; adjust below
     winner: undefined,                 // undefined: not chosen yet, null: nobody won, otherwise a player id
+    campaigns,
+    campaignId: null,
+    next: undefined,                   // the day chosen for the campaign's next session ('' = not decided)
   };
+  // A campaign session planned for that day starts selected, or the one we were asked for.
+  const chosen = campaigns.find((c) => c.id === (campaignId ?? plannedOn(campaigns, key)[0]?.id));
+  if (chosen) applyCampaignToLog(chosen);
+
+  const when = dateEditable
+    ? `<label class="field"><span>When</span>
+         <input id="log-date" type="date" min="${esc(state.pastDays[0]?.key ?? key)}" max="${esc(state.daysList[0]?.key ?? key)}" value="${esc(key)}">
+       </label>`
+    : `<p class="muted">${esc(longLabel(dayByKey(key).date))}. This is saved to the hall of fame for everyone.</p>`;
   $('#log-dialog').innerHTML = `
     <div class="sheet-head"><h2>Log game night</h2>${closeBtn()}</div>
     <form id="log-form" class="sheet-body" autocomplete="off">
-      <p class="muted">${esc(longLabel(day.date))}. This is saved to the hall of fame for everyone.</p>
+      ${when}
+      <fieldset id="log-campaign-field" class="field" hidden><legend>Part of a campaign?</legend>
+        <div id="log-campaign" class="choices"></div>
+      </fieldset>
       <fieldset class="field"><legend>What did you play?</legend>
-        <div id="log-ideas" class="choices"></div>
-        <label class="sr-only" for="log-q">Something else</label>
-        <input id="log-q" type="search" placeholder="Something else? Search, or type a name" spellcheck="false">
-        <ul id="log-results" class="results"></ul>
+        <div id="log-game-pick">
+          <div id="log-ideas" class="choices"></div>
+          <label class="sr-only" for="log-q">Something else</label>
+          <input id="log-q" type="search" placeholder="Something else? Search, or type a name" spellcheck="false">
+          <ul id="log-results" class="results"></ul>
+        </div>
         <p id="log-picked" class="log-picked"></p>
       </fieldset>
       <fieldset class="field"><legend>Who played?</legend><div id="log-players" class="choices"></div></fieldset>
       <fieldset class="field"><legend>Who won?</legend><div id="log-winner" class="choices"></div></fieldset>
+      <label id="log-next-field" class="field" hidden><span>Next session (optional)</span>
+        <select id="log-next"></select>
+        <small class="muted">Pick the day while you're all together. It shows on the calendar for everyone in the campaign.</small>
+      </label>
+      <label class="field"><span>Note (optional)</span>
+        <input id="log-note" maxlength="140" placeholder="e.g. a close finish, or what happened this chapter">
+      </label>
       <p id="log-error" class="error" role="alert" hidden></p>
       <div class="row">
         <button type="button" class="btn" data-action="close-dialog">Cancel</button>
         <button type="submit" class="btn btn--solid">Log it</button>
       </div>
     </form>`;
+  renderLogCampaign();
   renderLogGame();
   renderLogPlayers();
   renderLogWinner();
+  renderLogNext();
   $('#log-dialog').showModal();
 }
 
+// Picking a campaign fixes the game and starts the players from the campaign's own.
+function applyCampaignToLog(campaign) {
+  const L = state.log;
+  L.campaignId = campaign.id;
+  L.next = undefined;
+  L.game = { id: campaign.game.id ?? null, name: campaign.game.name, year: campaign.game.year || 0 };
+  L.players = new Set(campaign.players.filter((id) => state.players[id]));
+  if (L.winner && !L.players.has(L.winner)) L.winner = undefined;
+}
+
+function renderLogCampaign() {
+  const { campaigns, campaignId } = state.log;
+  $('#log-campaign-field').hidden = !campaigns.length;
+  rerender($('#log-campaign'), campaigns.length
+    ? choice('data-action="log-campaign" data-id=""', !campaignId, '<span>No, a normal game night</span>')
+      + campaigns.map((c) => choice(`data-action="log-campaign" data-id="${esc(c.id)}"`, campaignId === c.id, `<span>${esc(c.title)}</span>`)).join('')
+    : '');
+}
+
+// The days a campaign's next session can be on: after the day being logged, within the calendar.
+// Starts on the session that is already planned, if it is still ahead.
+function renderLogNext() {
+  const L = state.log;
+  const campaign = L.campaignId ? state.campaigns.find((c) => c.id === L.campaignId) : null;
+  $('#log-next-field').hidden = !campaign;
+  if (!campaign) return;
+  const days = state.daysList.filter((d) => d.key > L.date);
+  if (L.next === undefined) L.next = days.some((d) => d.key === campaign.next) ? campaign.next : '';
+  if (L.next && !days.some((d) => d.key === L.next)) L.next = '';
+  $('#log-next').innerHTML = `<option value="">Not decided yet</option>${days.map((d) => {
+    const inCount = campaign.players.filter((pid) => savedIds(d.key).includes(pid)).length;
+    const when = d.date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+    return `<option value="${esc(d.key)}"${L.next === d.key ? ' selected' : ''}>${when} · ${inCount}/${campaign.players.length} available</option>`;
+  }).join('')}`;
+}
+
 function renderLogGame() {
-  const { ideas, game } = state.log;
+  const { ideas, game, campaignId } = state.log;
+  const campaign = campaignId ? state.campaigns.find((c) => c.id === campaignId) : null;
+  $('#log-game-pick').hidden = !!campaign;   // the campaign decides the game
   rerender($('#log-ideas'), ideas.length
     ? ideas.map((g, i) => choice(`data-action="log-idea" data-i="${i}"`, sameGame(game, g), `<span>${esc(g.name)}</span>${g.year ? `<em>${g.year}</em>` : ''}`)).join('')
     : '<p class="muted">Nobody suggested a game for this day, so search for what you played.</p>');
-  $('#log-picked').innerHTML = game
-    ? `Playing: <strong>${esc(game.name)}</strong>`
-    : '<span class="muted">Choose a game above, or search for another.</span>';
+  $('#log-picked').innerHTML = campaign
+    ? `Campaign game: <strong>${esc(game.name)}</strong> · session ${sessionsOf(state.plays, campaign.id).length + 1}`
+    : game
+      ? `Playing: <strong>${esc(game.name)}</strong>`
+      : '<span class="muted">Choose a game above, or search for another.</span>';
 }
 
 function renderLogPlayers() {
@@ -969,26 +1176,45 @@ async function submitLog(form) {
   const L = state.log;
   const error = $('#log-error');
   const complain = (message) => { error.textContent = message; error.hidden = false; };
+  const today = state.daysList[0]?.key;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(L.date)) return complain('Choose the date.');
+  if (today && L.date > today) return complain("That date hasn't happened yet.");
   if (!L.game) return complain('Choose the game you played.');
   if (!L.players.size) return complain('Tick the players who took part.');
   if (L.winner === undefined) return complain('Choose who won, or "Nobody" for a co-op game or a draw.');
 
   const ids = sortedPlayers().filter((p) => L.players.has(p.id)).map((p) => p.id);
+  const play = {
+    date: L.date,
+    game: { id: L.game.id ?? null, name: L.game.name, year: L.game.year || 0 },
+    winner: L.winner,
+    players: ids,
+    names: Object.fromEntries(ids.map((id) => [id, state.players[id].name])),   // so history survives renames and removals
+    loggedBy: state.me,
+  };
+  const note = $('#log-note').value.trim().replace(/\s+/g, ' ');
+  if (note) play.note = note;
+  if (L.campaignId) play.campaign = L.campaignId;
+
   const submit = form.querySelector('[type="submit"]');
   submit.disabled = true;
   try {
-    await state.store.logPlay({
-      date: L.date,
-      game: { id: L.game.id ?? null, name: L.game.name, year: L.game.year || 0 },
-      winner: L.winner,
-      players: ids,
-      names: Object.fromEntries(ids.map((id) => [id, state.players[id].name])),   // so history survives renames and removals
-      loggedBy: state.me,
-    });
+    await state.store.logPlay(play);
+    // The session that was planned for this day (or earlier) is done now. Whatever day was chosen
+    // for the next one takes its place.
+    const campaign = L.campaignId ? state.campaigns.find((c) => c.id === L.campaignId) : null;
+    let next = '';
+    if (campaign) {
+      next = L.next ?? (campaign.next > L.date ? campaign.next : '');
+      if (next !== (campaign.next ?? '')) {
+        await state.store.updateCampaign(campaign.id, { next }).catch((err) => console.warn('Could not save the next session:', err));
+      }
+    }
     $('#log-dialog').close();
     if ($('#day-dialog').open) $('#day-dialog').close();
-    toast('Game night logged!');
-    location.hash = '#hall';
+    toast(campaign ? `Session logged!${next ? ` Next: ${dateLabel(next)}` : ''}` : 'Game night logged!');
+    location.hash = campaign ? '#campaigns' : '#hall';
+    if (location.hash === (campaign ? '#campaigns' : '#hall')) renderAll();
   } catch (err) {
     submit.disabled = false;
     fail(err, "Couldn't log it. If this keeps happening, the site owner may need to update the database rules.");
@@ -1007,6 +1233,458 @@ function deletePlay(id) {
     await state.store.deletePlay(id);
     toast('Entry removed');
   });
+}
+
+// ---------------------------------------------------------------------------
+// campaigns: long games played over several sessions (Arcs, Oath, ...)
+// ---------------------------------------------------------------------------
+
+function sessionRow(play, number) {
+  return `
+    <li class="session">
+      <span class="session-n" aria-label="Session ${number}">${number}</span>
+      <div class="session-body">
+        <strong>${esc(dateLabel(play.date))}</strong>
+        ${play.note ? `<p class="play-note">${esc(play.note)}</p>` : ''}
+      </div>
+    </li>`;
+}
+
+const campaignBtn = (action, c, inner, cls = '') => `<button type="button" class="btn ${cls}" data-action="${action}" data-id="${esc(c.id)}">${inner}</button>`;
+
+function campaignCard(c) {
+  const sessions = sessionsOf(state.plays, c.id);
+  const finished = c.status === 'finished';
+  const rights = myRights(c);
+  const g = c.game ?? {};
+  const list = [...sessions].reverse().map((p) => sessionRow(p, sessions.indexOf(p) + 1));
+  const iAmIn = !!state.me && c.players.includes(state.me);
+
+  // Who is in, and who may still join.
+  const joinState = finished ? '' : c.locked
+    ? `<span class="camp-state is-locked">${icon('lock', 2)}<span>Locked</span></span>`
+    : `<span class="camp-state">${icon('unlock', 2)}<span>Open to join</span></span>`;
+  const joinHint = finished || iAmIn || rights.join ? ''
+    : `<p class="muted camp-hint">${c.locked ? `Locked: only ${esc(playerName(c.createdBy))} can add players now.` : ''}</p>`;
+  const peopleButtons = [
+    rights.join ? campaignBtn('campaign-join', c, `${icon('plus', 2)} Join`, 'btn--solid') : '',
+    rights.manage ? campaignBtn('campaign-add', c, `${icon('plus', 2)} Add players`) : '',
+    rights.manage ? campaignBtn('campaign-lock', c, c.locked ? `${icon('unlock', 2)} Unlock` : `${icon('lock', 2)} Lock, everyone's in`) : '',
+    rights.leave ? campaignBtn('campaign-leave', c, 'Leave', 'btn--small') : '',
+  ].join('');
+  const playButtons = [
+    rights.log ? campaignBtn('campaign-log', c, `${icon('plus', 2)} Log session`, 'btn--solid') : '',
+    rights.plan ? campaignBtn('campaign-plan', c, `${icon('calendar', 2)} ${c.next ? 'Change next session' : 'Plan next session'}`) : '',
+    rights.manage ? campaignBtn('campaign-finish', c, `${icon('flag', 2)} Finish`) : '',
+    rights.reopen ? campaignBtn('campaign-reopen', c, `${icon('unlock', 2)} Reopen`) : '',
+  ].join('');
+
+  return `
+    <li id="campaign-${esc(c.id)}" class="campaign${finished ? ' is-finished' : ''}">
+      <div class="campaign-head">
+        <h3 class="campaign-title">${esc(c.title)}</h3>
+        <a class="game-link" href="${esc(g.id ? bggUrl(g.id) : bggSearchUrl(g.name))}" target="_blank" rel="noopener noreferrer">
+          <span class="game-name">${esc(g.name)}</span>${g.year ? `<span class="game-year">${g.year}</span>` : ''}${icon('arrow', 2)}
+          <span class="sr-only">(opens BoardGameGeek)</span>
+        </a>
+        ${finished ? `<span class="camp-state is-done">${icon('check', 2)}<span>Finished</span></span>` : joinState}
+      </div>
+      <p class="campaign-meta">
+        ${plural(sessions.length, 'session')}${sessions.length ? ` · last played ${esc(dateLabel(sessions.at(-1).date))}` : ' · not played yet'}${
+  finished ? ` · finished ${esc(dateLabel(c.finishedAt))}` : c.next ? ` · <strong>next: ${esc(dateLabel(c.next))}</strong>` : ''}
+        · started by ${esc(playerName(c.createdBy))}
+      </p>
+      ${finished ? `<p class="campaign-result">${icon('trophy', 2)} ${c.winner ? `Won by ${playerPill(c.winner)}` : 'Finished, with no single winner'}</p>` : ''}
+      <div class="pill-row">${c.players.map((id) => playerPill(id)).join('')}</div>
+      ${joinHint}
+      ${playButtons ? `<div class="actions">${playButtons}</div>` : ''}
+      ${peopleButtons ? `<div class="actions">${peopleButtons}</div>` : ''}
+      ${list.length ? fold(`sessions-${c.id}`, 'Sessions', { count: list.length, open: false, body: `<ul class="sessions">${list.join('')}</ul>` }) : ''}
+      ${state.admin.isAdmin ? `<button type="button" class="btn btn--small" data-action="campaign-delete" data-id="${esc(c.id)}">Remove campaign</button>` : ''}
+    </li>`;
+}
+
+function renderCampaigns() {
+  const body = $('#campaigns-body');
+  const count = $('#campaigns-count');
+  count.textContent = '';
+  if (state.campaignsError) {
+    body.innerHTML = "<p class=\"muted\">Campaigns can't be loaded right now. (Site owner: publish the updated Firestore rules from the README.)</p>";
+    return;
+  }
+  if (!state.campaignsReady) {
+    body.innerHTML = '<p class="loading">Loading…</p>';
+    return;
+  }
+  const { active, finished } = sortCampaigns(state.campaigns);
+  count.textContent = `${active.length} running · ${finished.length} finished`;
+  // While "Running campaigns" is collapsed, each one still shows its next day.
+  const runningPreview = `<div class="fold-preview"><ul class="camp-mini">${active.map((c) => `
+    <li><strong>${esc(c.title)}</strong><span class="muted">${c.next ? `next: ${esc(dateLabel(c.next))}` : 'no next day yet'}</span></li>`).join('')}</ul></div>`;
+  body.innerHTML = `
+    <div class="campaigns-intro">
+      <p>Long games that take several sessions, like Arcs or Oath. Start one and others can join until you lock it. Anyone in it logs the sessions and picks the next day.</p>
+      <button type="button" class="btn btn--solid" data-action="start-campaign">${icon('plus', 2)} Start a campaign</button>
+    </div>
+    ${active.length
+    ? fold('running-campaigns', 'Running campaigns', {
+      count: active.length, preview: runningPreview, body: `<ul class="campaign-list">${active.map(campaignCard).join('')}</ul>`,
+    })
+    : '<p class="muted">No running campaigns yet.</p>'}
+    ${finished.length ? fold('finished-campaigns', 'Finished campaigns', {
+    count: finished.length, open: false, body: `<ul class="campaign-list">${finished.map(campaignCard).join('')}</ul>`,
+  }) : ''}`;
+}
+
+// --- start a campaign ---
+
+function openStartCampaign() {
+  if (!state.me) return openWho('choose');
+  state.start = { game: null, players: new Set([state.me]) };
+  $('#campaign-dialog').innerHTML = `
+    <div class="sheet-head"><h2>Start a campaign</h2>${closeBtn()}</div>
+    <form id="campaign-form" class="sheet-body" autocomplete="off">
+      <fieldset class="field"><legend>Which game?</legend>
+        <label class="sr-only" for="camp-q">Search for the game</label>
+        <input id="camp-q" type="search" placeholder="Search, or type a name" spellcheck="false">
+        <ul id="camp-results" class="results"></ul>
+        <p id="camp-picked" class="log-picked"></p>
+      </fieldset>
+      <label class="field"><span>Name (optional)</span>
+        <input id="camp-title" maxlength="80" placeholder="e.g. Arcs: the long game">
+      </label>
+      <fieldset class="field"><legend>Who's in?</legend>
+        <div id="camp-players" class="choices"></div>
+        <small class="muted">Others can join later until you lock the campaign, and you can add people after that.</small>
+      </fieldset>
+      <p id="camp-error" class="error" role="alert" hidden></p>
+      <div class="row">
+        <button type="button" class="btn" data-action="close-dialog">Cancel</button>
+        <button type="submit" class="btn btn--solid">Start</button>
+      </div>
+    </form>`;
+  renderCampGame();
+  renderCampPlayers();
+  $('#campaign-dialog').showModal();
+  $('#camp-q').focus();
+}
+
+function renderCampGame() {
+  const { game } = state.start;
+  $('#camp-picked').innerHTML = game
+    ? `Game: <strong>${esc(game.name)}</strong>`
+    : '<span class="muted">Search for the game, then choose it from the list.</span>';
+}
+
+function renderCampPlayers() {
+  const { players } = state.start;
+  rerender($('#camp-players'), sortedPlayers().map((p) => choice(
+    `data-action="camp-player" data-id="${esc(p.id)}" style="--h:${hueOf(p.avatar)}"`,
+    players.has(p.id),
+    `${avatar(p.avatar, 24)}<span>${esc(p.name)}</span>`,
+    'choice--player',
+  )).join(''));
+}
+
+function renderCampResults() {
+  const input = $('#camp-q');
+  if (!input) return;
+  const raw = input.value.trim();
+  const out = [];
+  if (raw.length >= 2) {
+    const result = (g, hint = '') => `<li><button type="button" class="result" data-action="camp-pick-game" data-id="${g.id ?? ''}" data-name="${esc(g.name)}" data-year="${g.year || ''}">
+      <span class="result-name">${esc(g.name)}</span><span class="result-meta">${esc(hint || g.year || '')}</span>${icon('check', 2)}
+    </button></li>`;
+    if (isLoaded()) searchGames(raw, 6).forEach((g) => out.push(result(g)));
+    else {
+      out.push('<li class="muted">Loading the game list…</li>');
+      loadGames().then(renderCampResults).catch(() => {});
+    }
+    out.push(result({ id: null, name: raw, year: 0 }, 'use as typed'));
+  }
+  $('#camp-results').innerHTML = out.join('');
+}
+
+async function submitStartCampaign(form) {
+  const { game, players } = state.start;
+  const error = $('#camp-error');
+  const complain = (message) => { error.textContent = message; error.hidden = false; };
+  if (!game) return complain('Choose the game first.');
+  players.add(state.me);   // whoever starts a campaign is in it, and runs it
+  const ids = sortedPlayers().filter((p) => players.has(p.id)).map((p) => p.id);
+  const title = $('#camp-title').value.trim().replace(/\s+/g, ' ') || defaultTitle(game);
+  const submit = form.querySelector('[type="submit"]');
+  submit.disabled = true;
+  try {
+    await state.store.createCampaign({
+      game: { id: game.id ?? null, name: game.name, year: game.year || 0 },
+      title,
+      players: ids,
+      names: Object.fromEntries(ids.map((id) => [id, state.players[id].name])),
+      status: 'active',
+      locked: false,
+      startedAt: state.daysList[0].key,
+      next: '',
+      finishedAt: '',
+      winner: null,
+      createdBy: state.me,
+    });
+    $('#campaign-dialog').close();
+    toast('Campaign started!');
+  } catch (err) {
+    submit.disabled = false;
+    fail(err, "Couldn't start the campaign. If this keeps happening, the site owner may need to update the database rules.");
+  }
+}
+
+// --- plan the next session, finish, remove ---
+
+// A small popup in the shared "form" dialog.
+function openSheet(title, html) {
+  $('#form-dialog').innerHTML = `
+    <div class="sheet-head"><h2>${esc(title)}</h2>${closeBtn()}</div>
+    <div class="sheet-body">${html}</div>`;
+  if (!$('#form-dialog').open) $('#form-dialog').showModal();
+}
+
+function openPlan(id) {
+  const c = state.campaigns.find((x) => x.id === id);
+  if (!c) return;
+  if (!myRights(c).plan) return toast('Only people in the campaign can plan sessions.');
+  const days = state.daysList.map((d) => {
+    const inCount = c.players.filter((pid) => savedIds(d.key).includes(pid)).length;
+    return choice(
+      `data-action="campaign-set-next" data-id="${esc(c.id)}" data-date="${esc(d.key)}"`,
+      c.next === d.key,
+      `<span>${d.dow} ${d.num} ${d.month}</span><em>${inCount}/${c.players.length} available</em>`,
+    );
+  }).join('');
+  openSheet(`Next session: ${c.title}`, `
+    <p class="muted">Pick a day. It shows on the calendar, and you can log the session from there.</p>
+    <div class="choices">${days}</div>
+    <div class="row">
+      ${c.next ? `<button type="button" class="btn" data-action="campaign-set-next" data-id="${esc(c.id)}" data-date="">Clear the date</button>` : ''}
+      <button type="button" class="btn btn--solid" data-action="close-dialog">Done</button>
+    </div>`);
+}
+
+async function setNext(id, date) {
+  try {
+    await state.store.updateCampaign(id, { next: date });
+    $('#form-dialog').close();
+    toast(date ? `Next session: ${dateLabel(date)}` : 'Date cleared');
+  } catch (err) {
+    fail(err, "Couldn't save that. Please try again.");
+  }
+}
+
+function openFinish(id) {
+  const c = state.campaigns.find((x) => x.id === id);
+  if (!c) return;
+  if (!myRights(c).manage) return toast(`Only ${playerName(c.createdBy)} can finish this campaign.`);
+  state.finish = { id, winner: undefined };
+  renderFinish();
+}
+
+function renderFinish() {
+  const { id, winner } = state.finish;
+  const c = state.campaigns.find((x) => x.id === id);
+  const who = c.players.filter((pid) => state.players[pid]).map((pid) => state.players[pid]);
+  openSheet(`Finish: ${c.title}`, `
+    <p>Who won the campaign?</p>
+    <div class="choices">
+      ${who.map((p) => choice(`data-action="campaign-winner" data-id="${esc(p.id)}" style="--h:${hueOf(p.avatar)}"`, winner === p.id, `${avatar(p.avatar, 24)}<span>${esc(p.name)}</span>`, 'choice--player')).join('')}
+      ${choice('data-action="campaign-winner" data-id=""', winner === null, '<span>Nobody in particular (co-op or draw)</span>')}
+    </div>
+    <p class="muted">The sessions stay in the hall of fame. A finished campaign is closed: nobody can join it or log sessions. You can reopen it later if you play on.</p>
+    <div class="row">
+      <button type="button" class="btn" data-action="close-dialog">Cancel</button>
+      <button type="button" class="btn btn--solid" data-action="campaign-finish-confirm"${winner === undefined ? ' disabled' : ''}>Finish campaign</button>
+    </div>`);
+}
+
+async function confirmFinish() {
+  const { id, winner } = state.finish;
+  if (winner === undefined) return;
+  try {
+    await state.store.updateCampaign(id, { status: 'finished', finishedAt: state.daysList[0].key, winner, next: '' });
+    $('#form-dialog').close();
+    toast('Campaign finished!');
+  } catch (err) {
+    fail(err, "Couldn't finish the campaign. Please try again.");
+  }
+}
+
+// A finished campaign can be taken back to the running list by its creator (say it ended too
+// early, or you decided to play on). The winner and finish date are cleared; the sessions,
+// the people and the lock stay as they were.
+function openReopen(id) {
+  const c = state.campaigns.find((x) => x.id === id);
+  if (!c) return;
+  if (!myRights(c).reopen) return toast(`Only ${playerName(c.createdBy)} can reopen this campaign.`);
+  openSheet(`Reopen: ${c.title}`, `
+    <p>It goes back to the running campaigns, so you can log sessions again.${c.winner ? ` ${esc(playerName(c.winner))} is no longer its winner, until you finish it again.` : ''}</p>
+    <div class="row">
+      <button type="button" class="btn" data-action="close-dialog">Cancel</button>
+      <button type="button" class="btn btn--solid" data-action="campaign-reopen-confirm" data-id="${esc(c.id)}">Reopen campaign</button>
+    </div>`);
+}
+
+async function confirmReopen(id) {
+  const c = state.campaigns.find((x) => x.id === id);
+  if (!c || !myRights(c).reopen) return;
+  try {
+    await state.store.updateCampaign(id, { status: 'active', finishedAt: '', winner: null });
+    $('#form-dialog').close();
+    toast('Campaign reopened');
+    showCampaign(id);
+  } catch (err) {
+    fail(err, "Couldn't reopen the campaign. Please try again.");
+  }
+}
+
+// --- who is in: join, leave, lock, add people ---
+
+async function joinCampaign(id) {
+  if (!state.me) return openWho('choose');
+  const c = state.campaigns.find((x) => x.id === id);
+  if (!c || !myRights(c).join) return toast(c?.locked ? 'This campaign is locked.' : "You can't join this one.");
+  try {
+    await state.store.addCampaignPlayers(id, [{ id: state.me, name: state.players[state.me].name }]);
+    toast(`You joined ${c.title}`);
+  } catch (err) {
+    fail(err, "Couldn't join. Please try again.");
+  }
+}
+
+async function leaveCampaign(id) {
+  const c = state.campaigns.find((x) => x.id === id);
+  if (!c || !myRights(c).leave) return;
+  try {
+    await state.store.removeCampaignPlayer(id, state.me);
+    toast(`You left ${c.title}`);
+  } catch (err) {
+    fail(err, "Couldn't leave. Please try again.");
+  }
+}
+
+// Locking closes the door to joining. The creator can still add people, and can unlock again.
+async function toggleLock(id) {
+  const c = state.campaigns.find((x) => x.id === id);
+  if (!c || !myRights(c).manage) return;
+  const lock = !c.locked;
+  try {
+    await state.store.updateCampaign(id, { locked: lock });
+    toast(lock ? 'Locked: only you can add players now' : 'Unlocked: anyone can join');
+  } catch (err) {
+    fail(err, "Couldn't change that. Please try again.");
+  }
+}
+
+function openAddPlayers(id) {
+  const c = state.campaigns.find((x) => x.id === id);
+  if (!c || !myRights(c).manage) return;
+  state.addPeople = { id, picks: new Set() };
+  renderAddPlayers();
+}
+
+function renderAddPlayers() {
+  const { id, picks } = state.addPeople;
+  const c = state.campaigns.find((x) => x.id === id);
+  if (!c) return;
+  const others = outsiders(c, sortedPlayers());
+  openSheet(`Add players: ${c.title}`, others.length ? `
+    <p class="muted">Tick who to add. They're in straight away, even if the campaign is locked.</p>
+    <div class="choices">${others.map((p) => choice(
+    `data-action="campaign-add-pick" data-id="${esc(p.id)}" style="--h:${hueOf(p.avatar)}"`,
+    picks.has(p.id),
+    `${avatar(p.avatar, 24)}<span>${esc(p.name)}</span>`,
+    'choice--player',
+  )).join('')}</div>
+    <div class="row">
+      <button type="button" class="btn" data-action="close-dialog">Cancel</button>
+      <button type="button" class="btn btn--solid" data-action="campaign-add-confirm"${picks.size ? '' : ' disabled'}>Add ${picks.size ? plural(picks.size, 'player') : ''}</button>
+    </div>` : `
+    <p>Everyone in the crew is already in this campaign.</p>
+    <div class="row"><button type="button" class="btn btn--solid" data-action="close-dialog">OK</button></div>`);
+}
+
+async function confirmAddPlayers() {
+  const { id, picks } = state.addPeople;
+  const c = state.campaigns.find((x) => x.id === id);
+  if (!c || !myRights(c).manage || !picks.size) return;
+  const people = sortedPlayers().filter((p) => picks.has(p.id)).map((p) => ({ id: p.id, name: p.name }));
+  try {
+    await state.store.addCampaignPlayers(id, people);
+    $('#form-dialog').close();
+    toast(`Added ${listNames(people.map((p) => p.id))}`);
+  } catch (err) {
+    fail(err, "Couldn't add them. Please try again.");
+  }
+}
+
+// Admin only. The sessions stay in the hall of fame.
+function deleteCampaign(id) {
+  const c = state.campaigns.find((x) => x.id === id);
+  if (!c || !state.admin.isAdmin) return;
+  askConfirm({
+    title: `Remove ${c.title}?`,
+    message: 'The campaign disappears from this page. Its sessions stay in the hall of fame.',
+    label: 'Remove',
+  }, async () => {
+    await state.store.deleteCampaign(id);
+    toast('Campaign removed');
+  });
+}
+
+// ---------------------------------------------------------------------------
+// player cards
+// ---------------------------------------------------------------------------
+
+function openPlayerCard(id) {
+  const player = state.players[id];
+  if (!player) return;
+  let body;
+  if (state.playsError) {
+    body = '<p class="muted">The stats can\'t be loaded right now.</p>';
+  } else if (!state.playsReady) {
+    body = '<p class="loading">Loading…</p>';
+  } else {
+    const s = playerStats(state.plays, id);
+    const titles = awardTitles(state.plays).get(id) ?? [];
+    const record = campaignRecord(state.campaigns, id);
+    if (record.won > 0) titles.push('Campaign victor');
+    body = s.games === 0 ? '<p class="muted">No games logged yet. They show up here after the first logged game night.</p>' : `
+      ${titles.length ? `<div class="titles">${titles.map((t) => `<span class="title-tag">${icon('trophy', 2)}<span>${esc(t)}</span></span>`).join('')}</div>` : ''}
+      <dl class="stats">
+        <div><dt>Wins</dt><dd>${s.wins}</dd></div>
+        <div><dt>Win rate</dt><dd>${s.winRate === null ? '–' : `${Math.round(s.winRate * 100)}%`}</dd></div>
+        <div><dt>Games</dt><dd>${s.games}</dd></div>
+        <div><dt>Game nights</dt><dd>${s.nights}</dd></div>
+      </dl>
+      <ul class="facts">
+        ${s.favourite ? `<li>Favourite game: <strong>${esc(s.favourite.name)}</strong> <span class="muted">(${plural(s.favourite.n, 'play')})</span></li>` : ''}
+        ${s.bestAt ? `<li>Best at: <strong>${esc(s.bestAt.name)}</strong> <span class="muted">(${plural(s.bestAt.n, 'win')})</span></li>` : ''}
+        ${record.played ? `<li>Campaigns: <strong>${record.played}</strong> played, <strong>${record.won}</strong> won</li>` : ''}
+        ${s.contested < s.games ? `<li class="muted">Win rate only counts games that had a winner.</li>` : ''}
+      </ul>
+      <div>
+        <h3 class="h-small">Recent games</h3>
+        <ul class="recent">${s.recent.map((r) => `
+          <li><span class="muted">${esc(dateLabel(r.date))}</span> <strong>${esc(r.game)}</strong>${r.campaign ? ` ${icon('flag', 2)}` : ''} <span class="result-${r.result === 'won' ? 'won' : 'other'}">${esc(r.result)}</span></li>`).join('')}
+        </ul>
+      </div>`;
+  }
+  $('#player-dialog').innerHTML = `
+    <div class="sheet-head"><h2>Player card</h2>${closeBtn()}</div>
+    <div class="sheet-body">
+      <div class="card-head" style="--h:${hueOf(player.avatar)}">
+        ${avatar(player.avatar, 64)}
+        <span class="card-name">${esc(player.name)}${id === state.me ? ' <em>(you)</em>' : ''}</span>
+      </div>
+      ${body}
+    </div>`;
+  $('#player-dialog').showModal();
 }
 
 // ---------------------------------------------------------------------------
@@ -1361,12 +2039,70 @@ const actions = {
   'delete-play': (el) => deletePlay(el.dataset.id),
   'toggle-fold': (el) => {
     const id = el.dataset.fold;
-    if (state.folded.has(id)) state.folded.delete(id);
-    else state.folded.add(id);
-    ls.set(FOLD_KEY, JSON.stringify([...state.folded]));
+    state.folds[id] = !isOpen(id, el.dataset.default !== '0');
+    ls.set(FOLDS_KEY, JSON.stringify(state.folds));
+    renderLastWeek();
+    renderCampaigns();
     renderHall();
-    $(`[data-action="toggle-fold"][data-fold="${id}"]`)?.focus();   // keep keyboard focus on the button
+    document.querySelector(`[data-action="toggle-fold"][data-fold="${CSS.escape(id)}"]`)?.focus();   // keep keyboard focus on the button
   },
+  'player-card': (el) => openPlayerCard(el.dataset.id),
+  'log-session': (el) => openLog(el.dataset.date, { campaignId: el.dataset.campaign }),
+  'log-campaign': (el) => {
+    const L = state.log;
+    const campaign = state.campaigns.find((c) => c.id === el.dataset.id);
+    if (campaign) {
+      applyCampaignToLog(campaign);
+    } else {                                   // "No, a normal game night"
+      L.campaignId = null;
+      L.game = L.defaultGame;
+      L.players = new Set(L.defaultPlayers);
+      if (L.winner && !L.players.has(L.winner)) L.winner = undefined;
+    }
+    renderLogCampaign();
+    renderLogGame();
+    renderLogPlayers();
+    renderLogWinner();
+    renderLogNext();
+  },
+  'start-campaign': openStartCampaign,
+  'camp-pick-game': (el) => {
+    state.start.game = { id: Number(el.dataset.id) || null, name: el.dataset.name, year: Number(el.dataset.year) || 0 };
+    $('#camp-q').value = '';
+    renderCampResults();
+    renderCampGame();
+  },
+  'camp-player': (el) => {
+    const { players } = state.start;
+    if (el.dataset.id === state.me) return;   // the one who starts it is always in
+    if (players.has(el.dataset.id)) players.delete(el.dataset.id);
+    else players.add(el.dataset.id);
+    renderCampPlayers();
+  },
+  'campaign-log': (el) => openLog(state.daysList[0].key, { campaignId: el.dataset.id, dateEditable: true }),
+  'campaign-plan': (el) => openPlan(el.dataset.id),
+  'campaign-set-next': (el) => setNext(el.dataset.id, el.dataset.date),
+  'campaign-finish': (el) => openFinish(el.dataset.id),
+  'campaign-winner': (el) => {
+    state.finish.winner = el.dataset.id === '' ? null : el.dataset.id;   // '' is the "nobody in particular" choice
+    renderFinish();
+  },
+  'campaign-finish-confirm': confirmFinish,
+  'campaign-reopen': (el) => openReopen(el.dataset.id),
+  'campaign-reopen-confirm': (el) => confirmReopen(el.dataset.id),
+  'open-campaign': (el) => showCampaign(el.dataset.id),
+  'campaign-join': (el) => joinCampaign(el.dataset.id),
+  'campaign-leave': (el) => leaveCampaign(el.dataset.id),
+  'campaign-lock': (el) => toggleLock(el.dataset.id),
+  'campaign-add': (el) => openAddPlayers(el.dataset.id),
+  'campaign-add-pick': (el) => {
+    const { picks } = state.addPeople;
+    if (picks.has(el.dataset.id)) picks.delete(el.dataset.id);
+    else picks.add(el.dataset.id);
+    renderAddPlayers();
+  },
+  'campaign-add-confirm': confirmAddPlayers,
+  'campaign-delete': (el) => deleteCampaign(el.dataset.id),
   install: installApp,
   profile: () => openWho('edit'),
   who: () => openWho('choose'),
@@ -1403,6 +2139,15 @@ document.addEventListener('click', (e) => {
 document.addEventListener('input', (e) => {
   if (e.target.id === 'game-q') renderResults();
   if (e.target.id === 'log-q') renderLogResults();
+  if (e.target.id === 'camp-q') renderCampResults();
+});
+
+document.addEventListener('change', (e) => {
+  if (e.target.id === 'log-date' && state.log) {
+    state.log.date = e.target.value;
+    renderLogNext();
+  }
+  if (e.target.id === 'log-next' && state.log) state.log.next = e.target.value;
 });
 
 document.addEventListener('submit', (e) => {
@@ -1411,6 +2156,7 @@ document.addEventListener('submit', (e) => {
   if (e.target.id === 'dp-add-form') $('#game-results [data-action="add-game"]')?.click();
   if (e.target.id === 'details-form') submitDetails(e.target);
   if (e.target.id === 'log-form') submitLog(e.target);
+  if (e.target.id === 'campaign-form') submitStartCampaign(e.target);
 });
 
 $('#day-dialog').addEventListener('close', () => { state.openKey = null; });
@@ -1443,12 +2189,19 @@ function onError(err) {
   showBanner("Can't reach the shared database. Check your connection, then reload. (Site owner: check the Firestore rules in the README.)");
 }
 
-function subscribe() {
+// Today and the next two weeks, plus the week before today (for the "Last week" preview).
+function setDays() {
   state.daysList = upcomingDays(DAYS_AHEAD);
+  state.pastDays = pastDays(DAYS_BEHIND);
+  state.futureKeys = new Set(state.daysList.map((d) => d.key));
+}
+
+function subscribe() {
+  setDays();
   state.unsubscribe?.();
   state.unsubscribe = state.store.subscribe(
     onData,
-    { from: state.daysList[0].key, to: state.daysList[state.daysList.length - 1].key },
+    { from: state.pastDays[0].key, to: state.daysList[state.daysList.length - 1].key },
     onError,
   );
 
@@ -1466,6 +2219,21 @@ function subscribe() {
       console.error(err);
       state.playsError = true;
       renderHall();
+    },
+  );
+
+  state.unsubscribeCampaigns?.();
+  state.unsubscribeCampaigns = state.store.subscribeCampaigns(
+    (campaigns) => {
+      state.campaigns = campaigns;
+      state.campaignsReady = true;
+      state.campaignsError = false;
+      renderAll();
+    },
+    (err) => {
+      console.error(err);
+      state.campaignsError = true;
+      renderCampaigns();
     },
   );
 }
@@ -1487,7 +2255,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 async function boot() {
-  state.daysList = upcomingDays(DAYS_AHEAD);
+  setDays();
   renderStatic();
   renderAll();
   registerServiceWorker();

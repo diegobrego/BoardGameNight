@@ -72,6 +72,35 @@
   --pill-s: 38%; --pill-l: 22%;
 }
 
+/* The Campaigns page is teal. */
+:root[data-page="campaigns"] {
+  --bg: #d9f3ee;
+  --paper: #fbfffe;
+  --ink: #05211d;
+  --line: #05211d;
+  --shadow: #05211d;
+  --solid: #0f766e;
+  --on-solid: #ffffff;
+  --pill-s: 90%; --pill-l: 91%;
+  --done-bg: #e3e8e6;       /* a finished campaign: a flat, desaturated tint */
+  --done-fg: #3b4a47;
+  --dots-light: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4' fill='%2314b8a6'%3E%3Crect x='0' y='0' width='1' height='1'/%3E%3Crect x='2' y='2' width='1' height='1'/%3E%3C/svg%3E");
+  --dots-mid: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4' fill='%2314b8a6'%3E%3Crect x='0' y='0' width='1' height='1'/%3E%3Crect x='2' y='0' width='1' height='1'/%3E%3Crect x='0' y='2' width='1' height='1'/%3E%3Crect x='2' y='2' width='1' height='1'/%3E%3C/svg%3E");
+}
+
+:root[data-theme="dark"][data-page="campaigns"] {
+  --bg: #061a19;
+  --paper: #0c2a28;
+  --ink: #dbfbf5;
+  --line: #2dd4bf;
+  --shadow: #0f766e;
+  --solid: #14b8a6;
+  --on-solid: #042f2e;
+  --pill-s: 38%; --pill-l: 22%;
+  --done-bg: #1a2321;
+  --done-fg: #9db5b0;
+}
+
 *, *::before, *::after { box-sizing: border-box; }
 
 html { -webkit-text-size-adjust: 100%; }
@@ -106,7 +135,7 @@ a { color: inherit; }
 }
 
 .ico { display: block; flex: none; }
-.day-flag .ico, .crew-del .ico, .icon-btn--small .ico { width: 15px; height: 15px; }
+.day-flag .ico, .crew-del .ico, .icon-btn--small .ico, .day-log .ico, .day-campaign .ico, .campaign-tag .ico, .title-tag .ico { width: 15px; height: 15px; }
 .muted { opacity: .7; }
 
 /* ---------------------------------------------------------------- layout */
@@ -143,22 +172,30 @@ a { color: inherit; }
 .tab[aria-current="page"] { background: var(--solid); color: var(--on-solid); }
 
 /* "Game night tomorrow": orange, so it can't be mistaken for anything else on the page */
-.reminder { display: grid; gap: 10px; margin-top: 14px; }
+.reminder { display: grid; gap: 6px; margin-top: 12px; }
 .reminder[hidden] { display: none; }
 .reminder-item {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
-  padding: 10px 14px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px;
+  padding: 5px 12px;
   background: var(--alert); color: var(--on-alert);
-  border: var(--bw) solid var(--on-alert); border-radius: 14px;
-  box-shadow: 4px 4px 0 var(--shadow);
+  border: 2px solid var(--on-alert); border-radius: 10px;
+  box-shadow: 3px 3px 0 var(--shadow);
+  font-size: 15px; line-height: 1.25;
 }
 .reminder-icon { display: grid; place-items: center; flex: none; }
-.reminder-text { flex: 1 1 220px; min-width: 0; }
-.reminder-text strong { display: block; font-size: 18px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
-.reminder-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.reminder-text { display: flex; flex: 1 1 200px; flex-wrap: wrap; align-items: baseline; gap: 0 8px; min-width: 0; margin: 0; }
+.reminder-text strong { font-size: 15px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.reminder-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.reminder-link {
+  display: inline-flex; align-items: center; gap: 4px; padding: 0;
+  background: none; border: 0; color: inherit;
+  font-weight: 800; text-decoration: underline; text-underline-offset: 3px;
+}
+.reminder-link .ico { width: 14px; height: 14px; }
 .reminder .btn {
+  min-height: 0; padding: 0 9px; font-size: 13px; border-width: 2px;
   background: var(--on-alert); color: #fff; border-color: var(--on-alert);
-  box-shadow: 3px 3px 0 rgb(0 0 0 / .3);
+  box-shadow: 2px 2px 0 rgb(0 0 0 / .3);
 }
 
 .board {
@@ -399,6 +436,8 @@ a.btn { text-decoration: none; }
 :root[data-theme="dark"] .sheet::backdrop { background-color: rgb(8 4 20 / .76); }
 :root[data-page="hall"] .sheet::backdrop { background-color: rgb(253 236 203 / .8); }
 :root[data-theme="dark"][data-page="hall"] .sheet::backdrop { background-color: rgb(20 11 2 / .78); }
+:root[data-page="campaigns"] .sheet::backdrop { background-color: rgb(217 243 238 / .8); }
+:root[data-theme="dark"][data-page="campaigns"] .sheet::backdrop { background-color: rgb(3 18 17 / .78); }
 
 .sheet-head {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
@@ -498,8 +537,9 @@ a.btn { text-decoration: none; }
 .pill.is-gone { padding: 3px 12px; background: var(--paper); border-style: dashed; opacity: .75; }   /* has left the crew */
 
 /* hall of fame page */
-.hall .board-head h2 { display: flex; align-items: center; gap: 10px; }
-.hall .board-head h2 .ico { width: 30px; height: 30px; color: var(--alert); }
+.hall .board-head h2, .campaigns .board-head h2 { display: flex; align-items: center; gap: 10px; }
+.hall .board-head h2 .ico, .campaigns .board-head h2 .ico { width: 30px; height: 30px; color: var(--alert); }
+.campaigns .board-head h2 .ico { color: var(--solid); }
 .rankings { display: grid; gap: 14px; margin-top: 14px; align-items: start; }
 .ranking { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .rank-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
@@ -547,6 +587,13 @@ input[type="search"], input[type="text"], input[type="time"], input:not([type]) 
   background: var(--paper);
   border: var(--bw) solid var(--line); border-radius: 10px;
 }
+select {
+  width: 100%; padding: 9px 12px;
+  font: inherit; color: var(--ink); background: var(--paper);
+  border: var(--bw) solid var(--line); border-radius: 10px;
+}
+select:focus-visible { outline-offset: 2px; }
+.field > small { font-size: 14px; }
 input::placeholder { color: var(--ink); opacity: .5; }
 input:focus-visible { outline-offset: 2px; }
 input[type="search"] { -webkit-appearance: none; appearance: none; }
@@ -637,4 +684,115 @@ input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; d
 
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
+}
+
+/* ---------------------------------------------------------------- last week */
+
+.lastweek { margin-top: 8px; }
+.lastweek:empty { display: none; }
+.lastweek .calendar { margin-top: 0; }
+.day.is-past { opacity: .8; }
+.day-log {
+  display: inline-flex; align-items: center; gap: 6px; padding: 1px 8px 1px 6px;
+  border: 2px solid currentColor; border-radius: 8px;
+  font-size: 13px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; white-space: nowrap;
+}
+.day-log.is-todo { background: var(--alert); color: var(--on-alert); border-color: var(--on-alert); }
+.day-campaign {
+  display: inline-flex; align-items: center; gap: 6px; padding: 1px 8px 1px 6px;
+  border: 2px dashed currentColor; border-radius: 8px; font-size: 13px; font-weight: 700;
+}
+.logged { display: grid; gap: 6px; }
+.logged li { display: flex; align-items: center; gap: 8px; }
+
+/* ---------------------------------------------------------------- players as buttons */
+
+.pill-btn {
+  display: inline-flex; align-items: center; gap: 8px; padding: 0;
+  background: none; border: 0; color: inherit; font-weight: 700; text-align: left;
+}
+.pill-row { display: flex; flex-wrap: wrap; gap: 8px; }
+button.pill { color: inherit; }
+.play-note { margin: 0; font-size: 15px; font-style: italic; opacity: .85; }
+
+/* ---------------------------------------------------------------- campaigns */
+
+.campaigns-intro { display: grid; justify-items: start; gap: 12px; margin-top: 12px; }
+.campaign-list { display: grid; gap: 14px; margin-top: 14px; }
+.campaign {
+  display: grid; gap: 10px; padding: 12px 14px; scroll-margin-top: 12px;
+  background: var(--paper);
+  border: var(--bw) solid var(--line); border-radius: 14px; box-shadow: 4px 4px 0 var(--shadow);
+}
+/* a finished campaign is closed: no shadow, a flat grey-green tint and a dashed edge */
+.campaign.is-finished {
+  background: var(--done-bg); border-style: dashed; box-shadow: none;
+}
+.campaign.is-finished .fold-head { background: transparent; }
+.camp-state {
+  display: inline-flex; align-items: center; gap: 6px; padding: 1px 9px 1px 7px;
+  border: 2px solid currentColor; border-radius: 8px;
+  font-size: 13px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; white-space: nowrap;
+}
+.camp-state .ico { width: 15px; height: 15px; }
+.camp-state.is-locked { background: var(--solid); color: var(--on-solid); border-color: var(--solid); }
+.camp-state.is-done { background: var(--done-fg); color: var(--done-bg); border-color: var(--done-fg); }
+.camp-hint { margin: 0; font-size: 14px; }
+.camp-hint:empty { display: none; }
+.camp-mini { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.camp-mini li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+#campaigns-body > .fold { margin-top: 18px; }
+.campaign-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.campaign-title { font-size: 20px; font-weight: 800; }
+.campaign-meta, .campaign-result { margin: 0; }
+.campaign-result { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-weight: 700; }
+.campaign > .btn { justify-self: start; }
+.sessions { display: grid; gap: 10px; }
+.session { display: flex; align-items: flex-start; gap: 10px; }
+.session-n {
+  display: grid; place-items: center; flex: none; width: 30px; height: 30px;
+  background: var(--solid); color: var(--on-solid);
+  border: 2px solid var(--line); border-radius: 8px; font-weight: 800;
+}
+.session-body { display: grid; gap: 4px; min-width: 0; }
+.session-result { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.campaign-tag {
+  display: inline-flex; align-items: center; gap: 6px; padding: 0 8px 0 6px;
+  background: var(--solid); color: var(--on-solid); border-radius: 7px;
+  font-size: 13px; font-weight: 700;
+}
+.campaign-plan {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border: var(--bw) dashed var(--line); border-radius: 10px;
+}
+.campaign-plan-icon { display: grid; place-items: center; flex: none; }
+.campaign-plan-text { display: grid; flex: 1; min-width: 0; }
+
+/* ---------------------------------------------------------------- player card */
+
+.card-head {
+  display: flex; align-items: center; gap: 14px; padding: 10px;
+  background: hsl(var(--h, 260) var(--pill-s) var(--pill-l));
+  border: var(--bw) solid var(--line); border-radius: 12px;
+}
+.card-name { font-size: 24px; font-weight: 800; }
+.card-name em { font-size: 16px; font-style: normal; font-weight: 400; opacity: .6; }
+.titles { display: flex; flex-wrap: wrap; gap: 8px; }
+.title-tag {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px 2px 8px;
+  background: var(--solid); color: var(--on-solid); border-radius: 8px;
+  font-size: 14px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+}
+.stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 0; }
+.stats > div { padding: 8px 6px; text-align: center; border: var(--bw) solid var(--line); border-radius: 12px; }
+.stats dt { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; opacity: .7; }
+.stats dd { margin: 0; font-size: 26px; font-weight: 800; }
+.facts, .recent { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.recent li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.recent .ico { width: 15px; height: 15px; }
+.result-won { font-weight: 800; }
+.result-other { opacity: .7; }
+
+@media (min-width: 440px) {
+  .stats { grid-template-columns: repeat(4, 1fr); }
 }

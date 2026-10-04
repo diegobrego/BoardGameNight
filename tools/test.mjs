@@ -5,7 +5,9 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { buildIcs } from '../js/ics.js';
-import { tally, ranked, newestFirst } from '../js/hall.js';
+import { tally, ranked, newestFirst, playerStats, awardTitles } from '../js/hall.js';
+import { pastDays, upcomingDays } from '../js/dates.js';
+import { sessionsOf, plannedOn, campaignRecord, sortCampaigns, defaultTitle, can, outsiders } from '../js/campaigns.js';
 
 const encoder = new TextEncoder();
 const root = new URL('..', import.meta.url);
@@ -171,4 +173,123 @@ const root = new URL('..', import.meta.url);
     assert.equal(event.responded, false, `not intercepted: ${request.method} ${request.url}`);
   }
   console.log('ok  service worker');
+}
+
+// ---- days: the last week ---------------------------------------------------------------
+{
+  const sunday = new Date(2026, 9, 4);   // Sunday 4 October 2026
+  const past = pastDays(7, sunday);
+  assert.deepEqual(
+    past.map((d) => d.key),
+    ['2026-09-27', '2026-09-28', '2026-09-29', '2026-09-30', '2026-10-01', '2026-10-02', '2026-10-03'],
+    'the seven days before today, oldest first',
+  );
+  assert.equal(past[6].dow, 'SAT', 'the last one is yesterday (Saturday)');
+  assert.ok(past.every((d) => d.isPast && !d.isToday), 'all marked as past');
+  const upcoming = upcomingDays(3, sunday);
+  assert.ok(upcoming[0].isToday && !upcoming[0].isPast && upcoming.every((d) => !d.isPast), 'upcoming days are not past');
+  assert.equal(pastDays(3, new Date(2026, 2, 2))[0].key, '2026-02-27', 'crosses a month boundary');
+  console.log('ok  last week');
+}
+
+// ---- player cards ------------------------------------------------------------------------
+{
+  const game = (id, name) => ({ id, name });
+  const plays = [
+    { id: 'a', date: '2026-09-13', game: game(13, 'Catan'), winner: 'mia', players: ['mia', 'leo', 'zoe', 'sam'], createdAt: 1 },
+    { id: 'b', date: '2026-09-20', game: game(1, 'Azul'), winner: 'leo', players: ['mia', 'leo', 'zoe'], createdAt: 2 },
+    { id: 'c', date: '2026-09-20', game: game(2, 'Wingspan'), winner: 'zoe', players: ['mia', 'leo', 'zoe'], createdAt: 3 },
+    { id: 'd', date: '2026-09-27', game: game(3, 'Pandemic'), winner: null, players: ['mia', 'leo', 'zoe', 'sam'], createdAt: 4 },
+    { id: 'e', date: '2026-09-27', game: game(4, '7 Wonders'), winner: 'mia', players: ['mia', 'leo', 'sam'], createdAt: 5 },
+    { id: 'f', date: '2026-10-04', game: game(13, 'Catan'), winner: 'mia', players: ['mia', 'leo', 'zoe', 'sam'], createdAt: 6 },
+  ];
+
+  const mia = playerStats(plays, 'mia');
+  assert.equal(mia.games, 6, 'six games');
+  assert.equal(mia.wins, 3, 'three wins');
+  assert.equal(mia.contested, 5, 'five of them had a winner (Pandemic did not)');
+  assert.equal(mia.winRate, 0.6, 'win rate ignores games with no winner: 3 of 5');
+  assert.equal(mia.nights, 4, 'four different nights');
+  assert.deepEqual(mia.favourite, { name: 'Catan', n: 2 }, 'favourite = most played');
+  assert.deepEqual(mia.bestAt, { name: 'Catan', n: 2 }, 'best at = most wins in one game');
+  assert.deepEqual(mia.recent[0], { date: '2026-10-04', game: 'Catan', result: 'won', campaign: false }, 'newest first');
+  assert.equal(mia.recent.length, 5, 'at most five recent games');
+
+  const sam = playerStats(plays, 'sam');
+  assert.equal(sam.wins, 0);
+  assert.equal(sam.bestAt, null, 'no wins, so no "best at"');
+  assert.deepEqual(playerStats(plays, 'nobody'), { games: 0, wins: 0, contested: 0, winRate: null, nights: 0, favourite: null, bestAt: null, recent: [] }, 'a player with no games');
+
+  const titles = awardTitles(plays);
+  assert.deepEqual(titles.get('mia'), ['Champion', 'Regular', 'Sharpshooter'], 'the leader holds all three');
+  assert.deepEqual(titles.get('leo'), ['Regular'], 'ties share a title (4 nights each for mia, leo and zoe)');
+  assert.deepEqual(titles.get('zoe'), ['Regular']);
+  assert.equal(titles.get('sam'), undefined, 'no title for sam');
+  assert.equal(awardTitles([]).size, 0, 'no titles without games');
+  console.log('ok  player cards');
+}
+
+// ---- campaigns ---------------------------------------------------------------------------
+{
+  const plays = [
+    { date: '2026-10-03', campaign: 'c1', createdAt: 2 },
+    { date: '2026-09-26', campaign: 'c1', createdAt: 1 },
+    { date: '2026-10-01', campaign: 'c2' },
+    { date: '2026-10-02' },
+  ];
+  assert.deepEqual(sessionsOf(plays, 'c1').map((p) => p.date), ['2026-09-26', '2026-10-03'], 'only that campaign, oldest first');
+  assert.deepEqual(sessionsOf(plays, 'nope'), [], 'no sessions yet');
+
+  const campaigns = [
+    { id: 'c1', status: 'active', players: ['mia', 'leo'], next: '2026-10-10', startedAt: '2026-09-20' },
+    { id: 'c2', status: 'finished', players: ['mia', 'zoe'], winner: 'zoe', finishedAt: '2026-10-01', startedAt: '2026-08-01' },
+    { id: 'c3', status: 'active', players: ['sam'], next: '', startedAt: '2026-10-02' },
+  ];
+  assert.deepEqual(plannedOn(campaigns, '2026-10-10').map((c) => c.id), ['c1'], 'a session planned for that day');
+  assert.deepEqual(plannedOn(campaigns, '2026-10-11'), [], 'nothing planned');
+  assert.deepEqual(plannedOn([{ ...campaigns[1], next: '2026-10-10' }], '2026-10-10'), [], 'finished campaigns plan nothing');
+  assert.deepEqual(campaignRecord(campaigns, 'mia'), { played: 2, won: 0 });
+  assert.deepEqual(campaignRecord(campaigns, 'zoe'), { played: 1, won: 1 });
+  const { active, finished } = sortCampaigns(campaigns);
+  assert.deepEqual(active.map((c) => c.id), ['c3', 'c1'], 'active: newest first');
+  assert.deepEqual(finished.map((c) => c.id), ['c2']);
+  assert.equal(defaultTitle({ name: 'Arcs' }), 'Arcs campaign');
+  console.log('ok  campaigns');
+}
+
+// ---- who may do what in a campaign -------------------------------------------------------
+{
+  const open = { id: 'c1', status: 'active', locked: false, createdBy: 'mia', players: ['mia', 'leo'] };
+  const locked = { ...open, locked: true };
+  const done = { ...open, status: 'finished' };
+
+  // a stranger can join an open campaign, but can't do anything else with it
+  assert.deepEqual(can(open, 'zoe'), { join: true, leave: false, log: false, plan: false, manage: false, reopen: false });
+  assert.equal(can(locked, 'zoe').join, false, 'a locked campaign takes nobody new');
+  assert.equal(can(open, null).join, false, 'nobody without a profile can join');
+
+  // a member logs and plans, and may walk out until it is locked
+  assert.deepEqual(can(open, 'leo'), { join: false, leave: true, log: true, plan: true, manage: false, reopen: false });
+  assert.deepEqual(can(locked, 'leo'), { join: false, leave: false, log: true, plan: true, manage: false, reopen: false }, 'locked: nobody leaves');
+
+  // the creator runs it, is always in, and can still add people once it is locked
+  assert.deepEqual(can(open, 'mia'), { join: false, leave: false, log: true, plan: true, manage: true, reopen: false });
+  assert.equal(can(locked, 'mia').manage, true);
+  assert.equal(can(open, 'leo').manage, false, 'only the creator finishes it');
+
+  // a signed-in admin can run any campaign, but still has to be in it to log sessions
+  assert.equal(can(open, 'zoe', { admin: true }).manage, true);
+  assert.equal(can(open, 'zoe', { admin: true }).log, false);
+
+  // a finished campaign is closed to everyone, except that its creator (or an admin) can reopen it
+  const closed = { join: false, leave: false, log: false, plan: false, manage: false };
+  assert.deepEqual(can(done, 'mia'), { ...closed, reopen: true });
+  assert.deepEqual(can(done, 'zoe', { admin: true }), { ...closed, reopen: true });
+  assert.deepEqual(can(done, 'leo'), { ...closed, reopen: false }, 'a member can not reopen it');
+  assert.deepEqual(can(done, 'zoe'), { ...closed, reopen: false }, 'neither can a stranger');
+  assert.equal(can(open, 'mia', { admin: true }).reopen, false, 'a running campaign has nothing to reopen');
+
+  // who could still be added
+  assert.deepEqual(outsiders(open, [{ id: 'mia' }, { id: 'zoe' }, { id: 'sam' }]).map((p) => p.id), ['zoe', 'sam']);
+  console.log('ok  campaign rights');
 }
