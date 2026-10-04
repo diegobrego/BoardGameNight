@@ -115,6 +115,7 @@ const state = {
   finish: null,              // state of the "Finish campaign" popup
   addPeople: null,           // state of the "Add players" popup of a campaign
   edit: null,                // state of the admin's "edit a hall-of-fame entry" form
+  adminSelected: null,       // the player picked on the Admin page (their details and remove button show)
   adminAllPlays: false,      // the Admin page lists every logged game, not just the newest
   backupNote: '',            // what the last backup download contained
   backupBusy: false,
@@ -388,20 +389,23 @@ function renderCalendar() {
   if (focused) $(`[data-date="${focused}"]`, el)?.focus({ preventScroll: true });
 }
 
-function renderCrew() {
-  const el = $('#crew');
+// "Players" under the calendar: a collapsible list. Closed (the default) it shows just the faces,
+// open it shows everyone by name; tap anyone for their player card. (Removing a player is done on
+// the Admin page, not here.)
+function renderPlayers() {
+  const el = $('#players');
   el.hidden = !state.ready;
   if (!state.ready) return;
   const list = sortedPlayers();
-  const admin = state.admin.isAdmin;
-  el.innerHTML = `
-    <h2 class="h-small">The crew <span class="count">${list.length}</span></h2>
-    ${admin && list.length ? '<p class="muted crew-hint">Admin: tap the X to remove someone from the crew and from all their days.</p>' : ''}
-    ${list.length
-    ? `<ul class="crew-list">${list.map((p) => `
-        <li class="crew-item${p.id === state.me ? ' is-me' : ''}" style="--h:${hueOf(p.avatar)}"><button type="button" class="pill-btn" data-action="player-card" data-id="${esc(p.id)}" title="Show ${esc(p.name)}'s card">${avatar(p.avatar, 28)}<span>${esc(p.name)}${p.id === state.me ? ' <em>(you)</em>' : ''}</span></button>${
-  admin ? `<button type="button" class="crew-del" data-action="delete-player" data-id="${esc(p.id)}" aria-label="Remove ${esc(p.name)}">${icon('x', 2)}</button>` : ''}</li>`).join('')}</ul>`
-    : '<p class="muted">Nobody has joined yet. Be the first!</p>'}`;
+  if (!list.length) {
+    el.innerHTML = '<h2 class="h-small">Players</h2><p class="muted">Nobody has joined yet. Be the first!</p>';
+    return;
+  }
+  const faces = `<div class="fold-preview"><ul class="player-faces">${list.map((p) => `
+      <li><button type="button" class="face-btn${p.id === state.me ? ' is-me' : ''}" style="--h:${hueOf(p.avatar)}" data-action="player-card" data-id="${esc(p.id)}" title="${esc(p.name)}${p.id === state.me ? ' (you)' : ''}" aria-label="Show ${esc(p.name)}'s card">${avatar(p.avatar, 30)}</button></li>`).join('')}</ul></div>`;
+  const names = `<ul class="player-list">${list.map((p) => `
+      <li class="player-item${p.id === state.me ? ' is-me' : ''}" style="--h:${hueOf(p.avatar)}"><button type="button" class="pill-btn" data-action="player-card" data-id="${esc(p.id)}" title="Show ${esc(p.name)}'s card">${avatar(p.avatar, 28)}<span>${esc(p.name)}${p.id === state.me ? ' <em>(you)</em>' : ''}</span></button></li>`).join('')}</ul>`;
+  el.innerHTML = fold('players', 'Players', { count: list.length, open: false, preview: faces, body: names });
 }
 
 // Admin only. It's a convenience rather than a lock (the link just fills in a WhatsApp
@@ -481,14 +485,14 @@ function showCampaign(id) {
 // hall of fame
 // ---------------------------------------------------------------------------
 
-// Someone who has left the crew is still shown by the name they had: logged games and
+// Someone who has left the group is still shown by the name they had: logged games and
 // campaigns keep a snapshot of the names.
 const nameFromHistory = (id) => state.plays.find((p) => p.names?.[id])?.names[id]
   ?? state.campaigns.find((c) => c.names?.[id])?.names[id]
   ?? 'Former player';
 const playerName = (id) => state.players[id]?.name ?? nameFromHistory(id);
 
-// A player as a tinted pill; tap it for their card. Someone who has since left the crew
+// A player as a tinted pill; tap it for their card. Someone who has since left the group
 // shows as plain text.
 function playerPill(id) {
   const p = state.players[id];
@@ -627,7 +631,7 @@ function renderAll() {
   renderToolbar();
   renderCalendar();
   renderLastWeek();
-  renderCrew();
+  renderPlayers();
   renderCampaigns();
   renderHall();
   renderAdmin();
@@ -1829,7 +1833,7 @@ function renderAddPlayers() {
       <button type="button" class="btn" data-action="close-dialog">Cancel</button>
       <button type="button" class="btn btn--solid" data-action="campaign-add-confirm"${picks.size ? '' : ' disabled'}>Add ${picks.size ? plural(picks.size, 'player') : ''}</button>
     </div>` : `
-    <p>Everyone in the crew is already in this campaign.</p>
+    <p>Everyone is already in this campaign.</p>
     <div class="row"><button type="button" class="btn btn--solid" data-action="close-dialog">OK</button></div>`);
 }
 
@@ -1941,18 +1945,36 @@ const gameLink = (g) => `<a class="game-link" href="${esc(g.id ? bggUrl(g.id) : 
 function adminPlayers() {
   const list = sortedPlayers();
   if (!list.length) return '<p class="muted">Nobody has joined yet.</p>';
+  if (state.adminSelected && !state.players[state.adminSelected]) state.adminSelected = null;
   const days = state.daysList.length;
   return `
-    <p class="muted">Removing someone takes them out of the crew and off every day they picked. Their logged games stay in the hall of fame, under the name they had.</p>
+    <p class="muted">Tap a player to see their details. Removing someone is done from there.</p>
     <ul class="adm-list">${list.map((p) => {
+    const open = p.id === state.adminSelected;
     const upcoming = state.daysList.filter((d) => savedIds(d.key).includes(p.id)).length;
-    const camps = state.campaigns.filter((c) => c.players?.includes(p.id)).length;
+    const camps = state.campaigns.filter((c) => c.players?.includes(p.id));
+    const s = state.playsReady ? playerStats(state.plays, p.id) : null;
     return `
-      <li class="adm-row">
-        <div class="adm-main">${playerPill(p.id)}
-          <span class="adm-sub">Available on ${upcoming} of the next ${days} days · ${plural((p.games ?? []).length, 'game')} in their collection · in ${plural(camps, 'campaign')}</span>
-        </div>
-        <div class="adm-actions"><button type="button" class="btn btn--small" data-action="delete-player" data-id="${esc(p.id)}">${icon('x', 2)} Remove</button></div>
+      <li class="adm-player${open ? ' is-selected' : ''}" style="--h:${hueOf(p.avatar)}">
+        <button type="button" class="adm-player-head" data-action="admin-select" data-id="${esc(p.id)}" aria-expanded="${open}">
+          ${avatar(p.avatar, 32)}<span class="adm-player-name">${esc(p.name)}</span>
+          <span class="adm-sub">${plural((p.games ?? []).length, 'game')} in collection</span>
+          ${icon('chevron', 2)}
+        </button>
+        ${open ? `
+        <div class="adm-player-detail">
+          <ul class="facts">
+            <li>Available on <strong>${upcoming}</strong> of the next ${days} days</li>
+            <li>${plural((p.games ?? []).length, 'game')} in their collection</li>
+            <li>In ${plural(camps.length, 'campaign')}${camps.length ? `: ${esc(camps.map((c) => c.title).join(', '))}` : ''}</li>
+            ${s ? `<li>${plural(s.games, 'logged game')}, ${plural(s.wins, 'win')}</li>` : ''}
+          </ul>
+          <p class="muted">Removing ${esc(p.name)} takes them out of the group and off every day they picked. Their logged games stay in the hall of fame, under the name they had.</p>
+          <div class="actions">
+            <button type="button" class="btn btn--small" data-action="player-card" data-id="${esc(p.id)}">Player card</button>
+            <button type="button" class="btn btn--small btn--danger" data-action="delete-player" data-id="${esc(p.id)}">${icon('x', 2)} Remove ${esc(p.name)}</button>
+          </div>
+        </div>` : ''}
       </li>`;
   }).join('')}</ul>`;
 }
@@ -2087,7 +2109,7 @@ async function downloadBackup() {
 
 const phName = (id) => state.players[id]?.name ?? state.edit?.names?.[id] ?? 'Former player';
 
-// Everyone who can be ticked: the crew, plus anyone on this entry who has since left it.
+// Everyone who can be ticked: the players, plus anyone on this entry who has since left it.
 const phPeople = () => [...sortedPlayers().map((p) => p.id), ...Object.keys(state.edit.names).filter((id) => !state.players[id])];
 
 function openPlayEditor(id = null) {
@@ -2302,7 +2324,7 @@ function renderWho() {
       <div class="sheet-body">
         <button type="button" class="btn btn--solid btn--wide" data-action="new-player">${icon('plus', 2)} I'm new here</button>
         <section class="block">
-          <h3 class="h-small">Already in the crew?</h3>
+          <h3 class="h-small">Already in the group?</h3>
           <p class="muted">Tap your own name. Don't tap someone else's: that lets you change their days and profile.</p>
           <ul class="pick-list">${list.map((p) => `
             <li><button type="button" class="person-btn${p.id === state.me ? ' is-me' : ''}" style="--h:${hueOf(p.avatar)}" data-action="pick-player" data-id="${esc(p.id)}">${avatar(p.avatar, 36)}<span>${esc(p.name)}</span></button></li>`).join('')}</ul>
@@ -2311,7 +2333,7 @@ function renderWho() {
     return;
   }
   const editing = mode === 'edit';
-  const title = editing ? 'Your profile' : list.length ? 'Join the crew' : "You're first!";
+  const title = editing ? 'Your profile' : list.length ? 'Join the group' : "You're first!";
   $('#who-dialog').innerHTML = `
     <div class="sheet-head"><h2>${title}</h2>${close}</div>
     <form id="who-form" class="sheet-body" autocomplete="off">
@@ -2444,10 +2466,11 @@ function deletePlayer(id) {
   if (!player || !state.admin.isAdmin) return;
   askConfirm({
     title: `Remove ${player.name}?`,
-    message: `${player.name} will be removed from the crew and taken off every day they picked. This can't be undone.`,
+    message: `${player.name} will be removed from the group and taken off every day they picked. This can't be undone.`,
     label: 'Remove',
   }, async () => {
     await state.store.deletePlayer(id);
+    if (state.adminSelected === id) state.adminSelected = null;
     toast(`Removed ${player.name}`);
   });
 }
@@ -2586,6 +2609,7 @@ const actions = {
     state.folds[id] = !isOpen(id, el.dataset.default !== '0');
     ls.set(FOLDS_KEY, JSON.stringify(state.folds));
     renderLastWeek();
+    renderPlayers();
     renderCampaigns();
     renderHall();
     renderAdmin();
@@ -2662,6 +2686,11 @@ const actions = {
   'close-dialog': (el) => el.closest('dialog').close(),
   'delete-player': (el) => deletePlayer(el.dataset.id),
   'admin-remove-game': adminRemoveGame,
+  'admin-select': (el) => {
+    state.adminSelected = state.adminSelected === el.dataset.id ? null : el.dataset.id;     // tap again to close
+    renderAdmin();
+    document.querySelector(`[data-action="admin-select"][data-id="${CSS.escape(el.dataset.id)}"]`)?.focus();
+  },
   'admin-plays-toggle': () => { state.adminAllPlays = !state.adminAllPlays; renderAdmin(); },
   'admin-backup': downloadBackup,
   'play-add': () => openPlayEditor(null),
