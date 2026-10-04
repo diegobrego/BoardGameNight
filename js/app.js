@@ -352,9 +352,10 @@ function dayTile(d) {
     'day', mine && 'is-mine', go && 'is-go', d.isWeekend && 'is-weekend', d.isPast && 'is-past',
     d.isToday && 'is-today', changed && 'is-changed', !ids.length && 'is-empty',
   ].filter(Boolean).join(' ');
-  const label = `${longLabel(d.date)}: ${plural(ids.length, 'player')} available${go ? (d.isPast ? ', was a game night' : ', game on') : ''}${mine ? ', including you' : ''}${campaigns.length ? `, campaign session: ${campaigns.map((c) => c.title).join(', ')}${myCampaign ? " (you're in it)" : ''}` : ''}${d.isPast && go ? (logged ? ', logged' : ', not logged yet') : ''}`;
+  const time = go ? (state.days[d.key]?.details?.time ?? '') : '';      // a game night with a start time shows it above the faces
+  const label = `${longLabel(d.date)}: ${plural(ids.length, 'player')} available${go ? (d.isPast ? ', was a game night' : ', game on') : ''}${mine ? ', including you' : ''}${campaigns.length ? `, campaign session: ${campaigns.map((c) => c.title).join(', ')}${myCampaign ? " (you're in it)" : ''}` : ''}${d.isPast && go ? (logged ? ', logged' : ', not logged yet') : ''}${time ? `, ${d.isPast ? 'was at' : 'starts at'} ${time}` : ''}`;
   const faces = ids.map((id) => avatar(state.players[id].avatar, 22, state.players[id].name)).join('');
-  const sub = d.isToday ? 'Today' : d.num === 1 ? d.month : '';
+  const sub =d.isToday ? 'Today' : d.num === 1 ? d.month : '';
   return `
     <button type="button" class="${cls}" data-action="${d.isPast ? 'open-day' : 'day'}" data-date="${d.key}" aria-label="${esc(label)}"${picking ? ` aria-pressed="${mine}"` : ''}>
       ${myCampaign ? `<span class="day-badge" title="${esc(`Your campaign: ${myCamps.map((c) => c.title).join(', ')}`)}" aria-hidden="true">${icon('flag', 2)}</span>` : ''}
@@ -363,7 +364,10 @@ function dayTile(d) {
         <span class="day-num">${d.num}</span>
         <span class="day-sub">${sub}</span>
       </span>
-      <span class="day-people">${faces}</span>
+      <span class="day-mid">
+        ${time ? `<span class="day-time">${icon('clock', 2)}<span>${esc(time)}</span></span>` : ''}
+        <span class="day-people">${faces}</span>
+      </span>
       <span class="day-status">
         <span class="day-count">${ids.length} available</span>
         ${go && !d.isPast ? `<span class="day-flag">${icon('star', 2)}<span>Game on</span></span>` : ''}
