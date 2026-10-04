@@ -368,8 +368,14 @@ a.btn { text-decoration: none; }
   .brand { font-size: 17px; }
 }
 
-/* Tablet / desktop: a 7-wide grid of tiles, two weeks tall. */
-@media (min-width: 760px) {
+/* Tablet, or a laptop window with display scaling on: the rows of the phone layout, two across.
+   (A 7-wide grid needs about 1080px; in a narrower window each day is too small for its tags.) */
+@media (min-width: 760px) and (max-width: 1079px) {
+  .calendar { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 8px; }
+}
+
+/* Desktop: a 7-wide grid of tiles, two weeks tall. */
+@media (min-width: 1080px) {
   .calendar { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 14px; padding: 8px; }
   .day {
     flex-direction: column; align-items: stretch; gap: 8px;
@@ -874,3 +880,58 @@ button.pill { color: inherit; }
 @media (min-width: 440px) {
   .stats { grid-template-columns: repeat(4, 1fr); }
 }
+
+/* ---------------------------------------------------------------- help page (help.html) */
+
+.help { display: grid; gap: 18px; margin-top: 16px; }
+.help-card {
+  padding: 16px; background: var(--paper);
+  border: var(--bw) solid var(--line); border-radius: 18px; box-shadow: 5px 5px 0 var(--shadow);
+}
+.help-card h2 { display: flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 800; }
+.help-card h3 { margin-top: 14px; }
+.help-card p, .help-card ul, .help-card ol { margin-bottom: 0; }
+.help-card > * + * { margin-top: 10px; }
+.help-lead { font-size: 17px; }
+.help-ico { display: inline-flex; vertical-align: -3px; color: var(--solid); }
+.help-card h2 .help-ico { color: var(--solid); }
+.help-ico .ico { width: 18px; height: 18px; }
+.help-card h2 .help-ico .ico { width: 27px; height: 27px; }
+.help-back { gap: 6px; }
+.help-back .ico { width: 15px; height: 15px; }
+
+/* numbered steps */
+.help-steps { counter-reset: step; display: grid; gap: 10px; padding: 0; list-style: none; }
+.help-steps > li { counter-increment: step; position: relative; min-height: 30px; padding-left: 42px; }
+.help-steps > li::before {
+  content: counter(step); position: absolute; left: 0; top: -1px;
+  display: grid; place-items: center; width: 30px; height: 30px;
+  background: var(--solid); color: var(--on-solid);
+  border: 2px solid var(--line); border-radius: 9px; font-weight: 800;
+}
+.help-list { display: grid; gap: 8px; padding-left: 20px; }
+
+/* a button or label as it looks on the page */
+.ui {
+  display: inline-block; padding: 0 8px;
+  background: var(--paper); color: var(--ink);
+  border: 2px solid var(--line); border-radius: 8px;
+  font-size: .86em; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+}
+kbd, code {
+  white-space: nowrap;
+  padding: 0 6px; border: 2px solid var(--line); border-radius: 6px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: .9em;
+}
+.help-tip { padding: 8px 12px; border: var(--bw) dashed var(--line); border-radius: 10px; }
+.help-toc { display: grid; gap: 4px; padding-left: 22px; }
+.help-toc a { text-underline-offset: 3px; }
+.help-card[id]:target { outline: 3px dashed var(--solid); outline-offset: 4px; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+/* the "?" that leads to it, in the main page's header */
+.help-link { font-size: 22px; font-weight: 800; text-decoration: none; line-height: 1; }
+@media (hover: hover) { .help-link:hover { background: var(--on-solid); color: var(--solid); } }
+/* the help page reads better as a narrower column than the calendar's wide board */
+.help-page { max-width: 780px; }

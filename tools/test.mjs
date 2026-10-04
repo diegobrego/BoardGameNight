@@ -341,3 +341,26 @@ const root = new URL('..', import.meta.url);
   assert.equal(withGame(full, azul), null, 'the list has a limit');
   console.log('ok  my games');
 }
+
+// ---- the help page (help.html) -----------------------------------------------------------
+{
+  const { iconInner } = await import('../js/icons.js');
+  const help = readFileSync(new URL('help.html', root), 'utf8');
+  const index = readFileSync(new URL('index.html', root), 'utf8');
+
+  const ids = new Set([...help.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]));
+  const jumps = [...help.matchAll(/href="#([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(jumps.length >= 6, 'the page has a list of sections to jump to');
+  for (const target of jumps) assert.ok(ids.has(target), `the jump link #${target} points at a real section`);
+
+  for (const [, name] of help.matchAll(/data-icon="([^"]+)"/g)) assert.ok(iconInner(name), `the icon "${name}" exists`);
+  assert.ok(existsSync(new URL('js/help.js', root)), 'the help page script exists');
+
+  assert.ok(/href="help\.html"/.test(index), 'the main page links to the help page');
+  assert.ok(/href="\.\/"/.test(help), 'the help page links back to the main page');
+  // the parts of the app the tutorial explains are all covered
+  for (const topic of ['Pick my days', 'Manage my collection', 'Add game from collection', 'Start a campaign', 'Log session']) {
+    assert.ok(help.includes(topic), `the tutorial mentions "${topic}"`);
+  }
+  console.log('ok  help page');
+}

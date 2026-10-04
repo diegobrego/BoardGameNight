@@ -59,6 +59,7 @@ In admin mode you get an **Admin** tag and an **X** next to everyone in "The cre
 
 ## How people use it
 
+- **Help page:** the **?** button at the top of every page (and **How it works** at the bottom) opens a short, illustrated guide, [`help.html`](help.html): getting started, joining a game night, building your game collection and starring favourites, adding a game to a day, starting or joining a campaign, and logging what you played. It is a normal page, so you can send its link (`…/help.html`) to someone new. Add `?demo` to the site address to practise on a private copy.
 - **First visit:** pick your name from the list, or add yourself (type a name, choose a pixel face). Your device remembers you; tap your name in the top corner to edit your profile or switch player.
 - **Pick my days:** tap every day you can play, then **Save**. Green days update live as you tick them.
 - **Game ideas:** tap any day with at least one available player (`MIN_PLAYERS_FOR_IDEAS`) to see who's in and add game ideas with the **+** button. Games link to their BoardGameGeek page. Posting an idea early lets others decide to join if they like it. The **?** next to "Game options" explains how game nights work.
@@ -93,7 +94,7 @@ In admin mode you get an **Admin** tag and an **X** next to everyone in "The cre
 - **Removing people:** the admin does it from the site (see above). Old days can be tidied in the Firebase console (Firestore Database → `days`).
 - **Fixing a hall-of-fame mistake:** entries can't be edited. The admin sees a small **X** on each entry to remove a wrong one (then log it again); without the admin set-up, delete it in the Firebase console (Firestore Database → `plays`).
 - **If the site looks out of date** (a new tab is missing, a button hasn't changed): the page you're looking at is an old copy that was cached or left open. Reload it with **Ctrl+Shift+R** (**Cmd+Shift+R** on a Mac). The installed app doesn't reload by itself, so close and reopen its window. If a reload still shows the old version, clear the site's data in the browser's settings (you'll be asked "who are you?" again; the calendar data is safe, it lives in the shared database). From now on the site also checks for a new version whenever you come back to it after a while, and shows **A new version of the site is ready** with a **Reload** button. (GitHub Pages tells browsers to keep files for 10 minutes; the service worker now asks the server every time instead, so a reload always gets the latest.)
-- **Tests:** `node tools/test.mjs` checks the calendar file, the hall-of-fame numbers, the player stats and titles, the campaign helpers and who may do what in a campaign, the collection and favourites, the "last week" dates and the service worker (no browser or install needed).
+- **Tests:** `node tools/test.mjs` checks the calendar file, the hall-of-fame numbers, the player stats and titles, the campaign helpers and who may do what in a campaign, the collection and favourites, the help page's links, the "last week" dates and the service worker (no browser or install needed).
 
 ## Customising
 
@@ -109,6 +110,7 @@ In admin mode you get an **Admin** tag and an **X** next to everyone in "The cre
 
 ```
 index.html            page shell
+help.html             the "How it works" guide (opened by the ? button)
 css/style.css         the 1-bit look
 js/app.js             all the UI
 js/store-firebase.js  shared backend (Firestore)
@@ -119,6 +121,7 @@ js/icons.js           vector icons
 js/ics.js             builds the "Add to calendar" file
 js/hall.js            hall-of-fame rankings, player stats and titles
 js/campaigns.js       small helpers for campaigns (sessions, who may do what)
+js/help.js            icons and the dark-mode button on the help page
 js/mygames.js         small helpers for a player's game collection (favourites, ordering)
 manifest.webmanifest  makes the site installable (name, icons, colours)
 sw.js                 service worker: installable, and the page opens offline

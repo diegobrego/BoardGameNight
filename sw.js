@@ -14,6 +14,7 @@ const CACHE = 'bgn-shell-v2';
 const SHELL = [
   './',
   'index.html',
+  'help.html',
   'manifest.webmanifest',
   'css/style.css',
   'js/app.js',
@@ -26,6 +27,7 @@ const SHELL = [
   'js/dates.js',
   'js/games.js',
   'js/hall.js',
+  'js/help.js',
   'js/icons.js',
   'js/ics.js',
   'js/mygames.js',

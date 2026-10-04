@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How it works · Board Game Night</title>
+  <meta name="description" content="A short guide to Board Game Night: join a game night, build your game collection, add games to a day and start a campaign.">
+  <meta name="theme-color" content="#6d28d9">
+  <!-- Same light / dark theme as the main page, picked before the page paints. -->
+  <script>
+    (function () {
+      var theme = null;
+      try { theme = localStorage.getItem('bgn.theme'); } catch (e) { /* private mode */ }
+      if (theme !== 'light' && theme !== 'dark') {
+        theme = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      document.documentElement.setAttribute('data-theme', theme);
+      document.documentElement.setAttribute('data-page', 'calendar');
+    })();
+  </script>
+  <link rel="icon" href="data:,">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app help-page">
+    <header class="top">
+      <h1 class="brand"><span class="brand-icon" id="brand-icon"></span><span>How it works</span></h1>
+      <div class="top-right">
+        <button type="button" id="theme-btn" class="theme-btn"></button>
+        <a class="btn btn--small help-back" href="./"><span data-icon="calendar"></span> Back to the site</a>
+      </div>
+    </header>
+
+    <main class="help">
+      <section class="help-card help-intro">
+        <p>Board Game Night helps our group find a day that works, pick what to play, and keep track of who won. Here's how to do the basics. Each part takes a minute.</p>
+        <p class="help-tip"><strong>Want to try things out first?</strong> Add <code>?demo</code> to the end of the address. You get a private practice copy that nobody else sees and that never touches the real calendar.</p>
+        <nav aria-label="On this page">
+          <h2 class="h-small">On this page</h2>
+          <ol class="help-toc">
+            <li><a href="#start">Get started</a></li>
+            <li><a href="#join">Join a game night</a></li>
+            <li><a href="#collection">Add games to your collection and mark favourites</a></li>
+            <li><a href="#add-game">Add a game to a day</a></li>
+            <li><a href="#campaign">Start or join a campaign</a></li>
+            <li><a href="#after">After you've played</a></li>
+            <li><a href="#more">Good to know</a></li>
+          </ol>
+        </nav>
+      </section>
+
+      <section class="help-card" id="start">
+        <h2><span class="help-ico" data-icon="meeple" data-size="3"></span> Get started</h2>
+        <p class="help-lead">The first time you open the site, it asks who you are. Nobody needs a password.</p>
+        <ol class="help-steps">
+          <li>Tap <b class="ui">I'm new here</b>.</li>
+          <li>Type your name and pick a pixel face. <b class="ui">More faces</b> shows other ones.</li>
+          <li>Tap <b class="ui">Join</b>. Your name and face now sit in the top right corner.</li>
+        </ol>
+        <p class="help-tip"><strong>Already in the crew?</strong> Tap your own name in the list instead. Please don't tap someone else's: it would let you change their days.</p>
+      </section>
+
+      <section class="help-card" id="join">
+        <h2><span class="help-ico" data-icon="calendar" data-size="3"></span> Join a game night</h2>
+        <p class="help-lead">Tell the group which days you can play. When enough of us are in, the day lights up.</p>
+        <ol class="help-steps">
+          <li>On the <b class="ui">Calendar</b> page, tap <b class="ui">Pick my days</b>.</li>
+          <li>Tap every day you can play. Those days turn purple. Tap a day again to un-pick it.</li>
+          <li>Tap <b class="ui">Save</b> at the bottom.</li>
+        </ol>
+        <p>Prefer one day at a time? Tap the day and then <b class="ui">I'm available this day</b>. Changed your mind later? Open the day and tap <b class="ui">I can't make it</b>.</p>
+        <p class="help-tip"><span class="help-ico" data-icon="star"></span> A day with <strong>3 or more</strong> players gets a green border and a <b class="ui">Game on</b> label: that's a game night. On the day before, and on the day itself, an orange banner at the top reminds everyone.</p>
+        <p>Once you're in for a day, you can also <strong>vote</strong> for the games you'd like to play there (the <span class="help-ico" data-icon="up"></span> arrow) and tap <b class="ui">I'll bring it</b> on a game you own.</p>
+      </section>
+
+      <section class="help-card" id="collection">
+        <h2><span class="help-ico" data-icon="box" data-size="3"></span> Add games to your collection and mark favourites</h2>
+        <p class="help-lead">Your collection is the list of games you own or love. Fill it once and you never have to search for them again.</p>
+        <ol class="help-steps">
+          <li>Tap your name in the top right corner. Your profile opens.</li>
+          <li>Tap <b class="ui">Manage my collection</b>.</li>
+          <li>Type a game's name in the search box and tap the game you mean. It's added to <b class="ui">My games</b>. You can also paste a BoardGameGeek link.</li>
+          <li>Tap the <span class="help-ico" data-icon="staroutline"></span> star next to a game to make it a <strong>favourite</strong>. Tap it again to take the star off. Favourites are listed first.</li>
+          <li>Made a mistake? Tap the <span class="help-ico" data-icon="x"></span> next to a game to remove it from your collection.</li>
+        </ol>
+        <p class="help-tip">Everyone can see your collection on your player card (tap your name anywhere on the site), so the group knows who owns what.</p>
+      </section>
+
+      <section class="help-card" id="add-game">
+        <h2><span class="help-ico" data-icon="plus" data-size="3"></span> Add a game to a day</h2>
+        <p class="help-lead">Suggest what to play. As soon as one person is available on a day, games can be added to it, so the others can see the idea and join in.</p>
+        <ol class="help-steps">
+          <li>Tap the day on the calendar. A panel opens with who's available.</li>
+          <li>Under <b class="ui">Game options</b>, tap <b class="ui">Add a game</b>.</li>
+          <li><strong>From your collection:</strong> tap <b class="ui">Add game from collection</b>, then tap the game. It goes on the day straight away. Games that are already there are greyed out.</li>
+          <li><strong>Something new:</strong> type the name in the search box and tap the game. You can also paste a BoardGameGeek link.</li>
+        </ol>
+        <p class="help-tip">You need to be available on that day to vote for a game or to say you'll bring it. The game with the most votes gets a <b class="ui">Top pick</b> label.</p>
+      </section>
+
+      <section class="help-card" id="campaign">
+        <h2><span class="help-ico" data-icon="flag" data-size="3"></span> Start or join a campaign</h2>
+        <p class="help-lead">A campaign is a long game you play over several evenings, like Arcs or Oath. The site keeps track of the sessions and of when you play next.</p>
+        <h3 class="h-small">Start one</h3>
+        <ol class="help-steps">
+          <li>Open the <b class="ui">Campaigns</b> page and tap <b class="ui">Start a campaign</b>.</li>
+          <li>Search for the game and tap it. Give the campaign a name if you like.</li>
+          <li>Tick who's playing and tap <b class="ui">Start</b>. You're the creator.</li>
+          <li>Others can now <b class="ui">Join</b> on their own. When everyone's in, tap <b class="ui">Lock, everyone's in</b>. After that only you can add people (with <b class="ui">Add players</b>).</li>
+        </ol>
+        <h3 class="h-small">Join one</h3>
+        <ol class="help-steps">
+          <li>Open the <b class="ui">Campaigns</b> page and find the campaign.</li>
+          <li>Tap <b class="ui">Join</b>. (If it says <em>Locked</em>, ask its creator to add you.)</li>
+        </ol>
+        <h3 class="h-small">Play it</h3>
+        <ol class="help-steps">
+          <li>After a session, anyone in the campaign taps <b class="ui">Log session</b>: tick who played, say who won, add a note if you like.</li>
+          <li>While you're all together, choose the <b class="ui">Next session</b> day in the same window. It shows on the calendar with a round <span class="help-ico" data-icon="flag"></span> flag, and everyone in the campaign gets a banner on the day before and the day itself.</li>
+          <li>Finished? The creator taps <b class="ui">Finish</b> and picks the winner. Changed your mind? <b class="ui">Reopen</b> brings it back.</li>
+        </ol>
+      </section>
+
+      <section class="help-card" id="after">
+        <h2><span class="help-ico" data-icon="trophy" data-size="3"></span> After you've played</h2>
+        <ol class="help-steps">
+          <li>Open today on the calendar and tap <b class="ui">Log game night</b>.</li>
+          <li>Pick the game, tick who played and choose the winner.</li>
+          <li>It's saved in the <b class="ui">Hall of fame</b>, where you can see who wins and who plays the most. Tap any name to see their player card.</li>
+        </ol>
+        <p class="help-tip">Forgot to log it on the day? Open <b class="ui">Last week</b> on the calendar and tap the day.</p>
+      </section>
+
+      <section class="help-card" id="more">
+        <h2><span class="help-ico" data-icon="help" data-size="3"></span> Good to know</h2>
+        <ul class="help-list">
+          <li><strong>Dark mode:</strong> the <span class="help-ico" data-icon="moon"></span> button at the top switches between light and dark.</li>
+          <li><strong>Install it as an app:</strong> tap <em>Install as an app</em> at the bottom of the main page. It then opens like any other app.</li>
+          <li><strong>Looks out of date?</strong> Reload with <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd>. If a bar says <em>A new version of the site is ready</em>, tap <b class="ui">Reload</b>.</li>
+          <li><strong>Wrong name or face?</strong> Tap your name, then <b class="ui">Save</b> after changing it. If you ended up as the wrong person, tap <b class="ui">Switch player</b> and pick yourself (or <b class="ui">I'm new here</b>).</li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <p><a href="./">← Back to the calendar</a></p>
+    </footer>
+  </div>
+
+  <script type="module" src="js/help.js"></script>
+</body>
+</html>
