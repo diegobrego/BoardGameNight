@@ -90,6 +90,18 @@ export function create() {
       persist(); emit();
     },
 
+    async deletePlayer(id) {
+      delete state.players[id];
+      for (const d of Object.values(state.days)) d.players = d.players.filter((p) => p !== id);
+      persist(); emit();
+    },
+
+    // The demo has no accounts, so everyone gets the admin tools to try out.
+    subscribeAdmin(fn) {
+      fn({ canSignIn: false, signedIn: false, checking: false, isAdmin: true, uid: null });
+      return () => {};
+    },
+
     reset() {
       try { localStorage.removeItem(KEY); } catch { /* ignore */ }
     },

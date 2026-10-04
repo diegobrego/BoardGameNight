@@ -1,5 +1,5 @@
 import { MIN_PLAYERS, DAYS_AHEAD } from './config.js';
-import { createStore } from './store.js';
+import { createStore, isForcedDemo } from './store.js';
 import { avatar, randomSeed } from './avatar.js';
 import { icon, iconPath } from './icons.js';
 import { upcomingDays, longLabel, rangeLabel } from './dates.js';
@@ -33,7 +33,11 @@ const state = {
   ready: false,              // first data has arrived
   players: {},               // id -> { id, name, avatar }
   days: {},                  // YYYY-MM-DD -> { players: [id], games: [...] }
-  me: ls.get('bgn.me'),      // this device's player id
+  meKey: 'bgn.me',           // localStorage key for "who am I" (the demo gets its own)
+  me: null,                  // this device's player id
+  admin: { canSignIn: false, signedIn: false, checking: false, isAdmin: false, uid: null },
+  adminAsked: false,         // the visitor just pressed "Admin sign-in"
+  onConfirm: null,           // what the confirm dialog's yes-button does
   daysList: [],              // the visible calendar days
   mode: 'view',              // 'view' | 'pick'
   draft: new Set(),          // day keys selected while picking
@@ -104,13 +108,30 @@ function renderStatic() {
     <li><span class="swatch swatch--weekend"></span>Weekend</li>`;
 }
 
+const isSharedAdmin = () => state.store?.mode === 'firebase' && state.admin.isAdmin;
+
 function renderHeader() {
   const me = state.players[state.me];
-  $('#me-slot').innerHTML = me
+  const adminTag = isSharedAdmin() ? '<span class="tag">Admin</span>' : '';
+  $('#me-slot').innerHTML = adminTag + (me
     ? `<button type="button" class="chip" data-action="profile" aria-label="Your profile: ${esc(me.name)}">${avatar(me.avatar, 28)}<span class="chip-name">${esc(me.name)}</span></button>`
     : state.ready
       ? `<button type="button" class="chip" data-action="who">${icon('plus', 2)}<span class="chip-name">Join</span></button>`
-      : '';
+      : '');
+}
+
+// Footer: the admin sign-in link, and what state it is in.
+function renderFooter() {
+  const a = state.admin;
+  const link = (action, label) => `<button type="button" class="link-btn" data-action="${action}">${label}</button>`;
+  let html = '';
+  if (state.store?.mode === 'firebase') {
+    if (a.isAdmin) html = `Admin mode is on · ${link('admin-signout', 'Sign out')}`;
+    else if (a.checking) html = 'Checking admin access…';
+    else if (a.signedIn) html = `Signed in, but not an admin yet · ${link('admin-help', 'Set up')} · ${link('admin-signout', 'Sign out')}`;
+    else html = link('admin-signin', 'Admin sign-in');
+  }
+  $('#admin-slot').innerHTML = html;
 }
 
 function renderToolbar() {
@@ -184,16 +205,20 @@ function renderCrew() {
   el.hidden = !state.ready;
   if (!state.ready) return;
   const list = sortedPlayers();
+  const admin = state.admin.isAdmin;
   el.innerHTML = `
     <h2 class="h-small">The crew <span class="count">${list.length}</span></h2>
+    ${admin && list.length ? '<p class="muted crew-hint">Admin: tap the X to remove someone from the crew and from all their days.</p>' : ''}
     ${list.length
     ? `<ul class="crew-list">${list.map((p) => `
-        <li class="crew-item${p.id === state.me ? ' is-me' : ''}">${avatar(p.avatar, 28)}<span>${esc(p.name)}${p.id === state.me ? ' <em>(you)</em>' : ''}</span></li>`).join('')}</ul>`
+        <li class="crew-item${p.id === state.me ? ' is-me' : ''}">${avatar(p.avatar, 28)}<span>${esc(p.name)}${p.id === state.me ? ' <em>(you)</em>' : ''}</span>${
+  admin ? `<button type="button" class="crew-del" data-action="delete-player" data-id="${esc(p.id)}" aria-label="Remove ${esc(p.name)}">${icon('x', 2)}</button>` : ''}</li>`).join('')}</ul>`
     : '<p class="muted">Nobody has joined yet. Be the first!</p>'}`;
 }
 
 function renderAll() {
   renderHeader();
+  renderFooter();
   renderToolbar();
   renderCalendar();
   renderCrew();
@@ -304,7 +329,7 @@ function renderDayPanel() {
             <span class="sr-only">(opens BoardGameGeek)</span>
           </a>
           ${by ? `<span class="game-by">added by ${avatar(by.avatar, 18)} ${esc(by.name)}</span>` : ''}
-          ${g.by === state.me ? `<button type="button" class="icon-btn" data-action="remove-game" data-gk="${esc(gameKey(g))}" aria-label="Remove ${esc(g.name)}">${icon('x', 2)}</button>` : ''}
+          ${g.by === state.me || state.admin.isAdmin ? `<button type="button" class="icon-btn" data-action="remove-game" data-gk="${esc(gameKey(g))}" aria-label="Remove ${esc(g.name)}">${icon('x', 2)}</button>` : ''}
         </li>`;
     }).join('')
     : go ? '<li class="muted">No games yet. Add the first one!</li>' : '';
@@ -398,7 +423,9 @@ async function addGame(game) {
 
 async function removeGame(el) {
   const key = state.openKey;
-  const game = (state.days[key]?.games ?? []).find((g) => gameKey(g) === el.dataset.gk && g.by === state.me);
+  const game = (state.days[key]?.games ?? []).find(
+    (g) => gameKey(g) === el.dataset.gk && (g.by === state.me || state.admin.isAdmin),
+  );
   if (!game) return;
   try {
     await state.store.removeGame(key, game);
@@ -413,7 +440,7 @@ async function removeGame(el) {
 
 function setMe(id) {
   state.me = id;
-  ls.set('bgn.me', id);
+  ls.set(state.meKey, id);
   renderAll();
 }
 
@@ -511,6 +538,116 @@ async function submitWho(form) {
 }
 
 // ---------------------------------------------------------------------------
+// admin: sign in, and remove players
+// ---------------------------------------------------------------------------
+
+function askConfirm({ title, message, label }, onYes) {
+  state.onConfirm = onYes;
+  $('#confirm-dialog').innerHTML = `
+    <div class="sheet-head">
+      <h2>${esc(title)}</h2>
+      <button type="button" class="icon-btn" data-action="close-dialog" aria-label="Close">${icon('x', 2)}</button>
+    </div>
+    <div class="sheet-body">
+      <p>${esc(message)}</p>
+      <div class="row">
+        <button type="button" class="btn" data-action="close-dialog">Cancel</button>
+        <button type="button" class="btn btn--solid" data-action="confirm-yes">${esc(label)}</button>
+      </div>
+    </div>`;
+  $('#confirm-dialog').showModal();
+}
+
+async function confirmYes(el) {
+  el.disabled = true;
+  el.textContent = 'Working…';
+  try {
+    await state.onConfirm();
+    $('#confirm-dialog').close();
+  } catch (err) {
+    el.disabled = false;
+    el.textContent = 'Try again';
+    fail(err, "That didn't work. Are you still signed in as admin?");
+  }
+}
+
+function deletePlayer(id) {
+  const player = state.players[id];
+  if (!player || !state.admin.isAdmin) return;
+  askConfirm({
+    title: `Remove ${player.name}?`,
+    message: `${player.name} will be removed from the crew and taken off every day they picked. This can't be undone.`,
+    label: 'Remove',
+  }, async () => {
+    await state.store.deletePlayer(id);
+    toast(`Removed ${player.name}`);
+  });
+}
+
+const SIGN_IN_PROBLEMS = {
+  'auth/popup-blocked': 'Your browser blocked the sign-in pop-up. Allow pop-ups for this site and try again.',
+  'auth/unauthorized-domain': "This site's address isn't authorised for sign-in yet. In the Firebase console open Authentication → Settings → Authorized domains and add it.",
+  'auth/operation-not-allowed': 'Google sign-in is not switched on yet. In the Firebase console open Authentication → Sign-in method, choose Google and enable it.',
+};
+const SIGN_IN_CANCELLED = ['auth/popup-closed-by-user', 'auth/cancelled-popup-request'];
+
+function openAdminDialog({ problem } = {}) {
+  const body = problem
+    ? `<p class="error" role="alert">${esc(problem)}</p>`
+    : `<p>You're signed in, but this account isn't an admin yet. To make it one, add its ID to the database:</p>
+       <code class="uid">${esc(state.admin.uid)}</code>
+       <button type="button" class="btn" data-action="copy-uid">Copy ID</button>
+       <ol class="steps">
+         <li>Firebase console → <strong>Firestore Database → Data</strong>.</li>
+         <li><strong>Start collection</strong> named <code>admins</code> (if it already exists, open it and add a document).</li>
+         <li>Set the <strong>Document ID</strong> to the ID above, add any field (for example <code>note</code> = <code>owner</code>), and save.</li>
+       </ol>
+       <p class="muted">This page switches to admin mode by itself once the document exists.</p>`;
+  $('#admin-dialog').innerHTML = `
+    <div class="sheet-head">
+      <h2>${problem ? "Couldn't sign in" : 'Almost there'}</h2>
+      <button type="button" class="icon-btn" data-action="close-dialog" aria-label="Close">${icon('x', 2)}</button>
+    </div>
+    <div class="sheet-body">${body}</div>`;
+  if (!$('#admin-dialog').open) $('#admin-dialog').showModal();
+}
+
+async function adminSignIn() {
+  state.adminAsked = true;
+  try {
+    await state.store.signIn();
+  } catch (err) {
+    state.adminAsked = false;
+    if (SIGN_IN_CANCELLED.includes(err.code)) return;
+    console.error(err);
+    openAdminDialog({ problem: SIGN_IN_PROBLEMS[err.code] ?? 'Sign-in failed. Please try again.' });
+  }
+}
+
+async function copyUid() {
+  try {
+    await navigator.clipboard.writeText(state.admin.uid);
+    toast('ID copied');
+  } catch {
+    toast('Select the ID and copy it by hand');
+  }
+}
+
+function onAdmin(admin) {
+  state.admin = admin;
+  const dialog = $('#admin-dialog');
+  if (state.adminAsked && admin.signedIn && !admin.checking) {
+    state.adminAsked = false;
+    if (admin.isAdmin) toast('Admin mode on');
+    else openAdminDialog();
+  } else if (admin.isAdmin && dialog.open) {
+    dialog.close();      // the admins document was just created
+    toast('Admin mode on');
+  }
+  renderAll();
+}
+
+// ---------------------------------------------------------------------------
 // events
 // ---------------------------------------------------------------------------
 
@@ -541,7 +678,13 @@ const actions = {
   cand: (el) => { state.who.sel = Number(el.dataset.i); renderCands(); },
   reroll: rerollFaces,
   'close-dialog': (el) => el.closest('dialog').close(),
-  'reset-demo': () => { state.store.reset(); ls.set('bgn.me', null); location.reload(); },
+  'delete-player': (el) => deletePlayer(el.dataset.id),
+  'confirm-yes': confirmYes,
+  'admin-signin': adminSignIn,
+  'admin-signout': () => state.store.signOut(),
+  'admin-help': () => openAdminDialog(),
+  'copy-uid': copyUid,
+  'reset-demo': () => { state.store.reset(); ls.set(state.meKey, null); location.reload(); },
 };
 
 // A click that starts and ends on a dialog's backdrop closes it. (Tracking the
@@ -579,9 +722,12 @@ function onData({ players, days, synced }) {
   state.days = days;
   state.ready = true;
   if (state.me && !players[state.me] && synced) {
-    // This device remembered a player who isn't in the database any more.
+    // This device remembered a player who isn't in the database any more (for
+    // example an admin removed them): forget them and ask who they are again.
     state.me = null;
-    ls.set('bgn.me', null);
+    state.mode = 'view';
+    state.askedWho = false;
+    ls.set(state.meKey, null);
   }
   renderAll();
   if (!state.me && !state.askedWho) {
@@ -626,9 +772,18 @@ async function boot() {
     showBanner("The app couldn't start. If you just set up Firebase, double-check js/config.js.");
     return;
   }
+  // The demo and the real site remember "who am I" separately.
+  state.meKey = state.store.mode === 'local' ? 'bgn.me.demo' : 'bgn.me';
+  state.me = ls.get(state.meKey);
   if (state.store.mode === 'local') {
-    showBanner(`<strong>Demo mode.</strong> Nothing here is shared yet; it all stays in this browser. See the README to connect the shared database. <button type="button" class="btn btn--small" data-action="reset-demo">Reset demo</button>`);
+    const note = isForcedDemo
+      ? 'Nothing here touches the shared database; it all stays in this browser.'
+      : 'Nothing here is shared yet; it all stays in this browser. See the README to connect the shared database.';
+    showBanner(`<strong>Demo mode.</strong> ${note}
+      <button type="button" class="btn btn--small" data-action="reset-demo">Reset demo</button>
+      ${isForcedDemo ? `<a class="btn btn--small" href="${esc(location.pathname)}">Back to the real site</a>` : ''}`);
   }
+  state.store.subscribeAdmin(onAdmin);
   subscribe();
 }
 

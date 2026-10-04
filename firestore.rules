@@ -2,12 +2,27 @@ rules_version = '2';
 
 // Paste this into Firebase console -> Firestore Database -> Rules -> Publish.
 //
-// The group has no passwords: anyone who has the site link can read and edit.
-// These rules keep that open door narrow: only the two kinds of documents the app
-// uses, in the shape it uses them, and nothing can be deleted.
+// Players have no passwords: anyone who has the site link can read and edit
+// the calendar. These rules keep that open door narrow: only the kinds of
+// documents the app uses, in the shape it uses them.
+//
+// Deleting a player is different. It needs a signed-in admin: a Google account
+// whose user ID has a document in the `admins` collection. Only you can create
+// those documents (by hand, in the Firebase console); nobody can through the app.
 
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function isAdmin() {
+      return request.auth != null
+          && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // A signed-in account can check whether it is an admin, and nothing else here.
+    match /admins/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
+    }
 
     match /players/{playerId} {
       allow read: if true;
@@ -16,7 +31,7 @@ service cloud.firestore {
                             && request.resource.data.name.size() > 0
                             && request.resource.data.name.size() <= 20
                             && request.resource.data.avatar is number;
-      allow delete: if false;
+      allow delete: if isAdmin();
     }
 
     // One document per calendar day, named like "2026-10-09".

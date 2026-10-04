@@ -10,7 +10,7 @@ Plain HTML/CSS/JS, no build step, hosted for free on GitHub Pages. Look: 1-bit P
 node tools/serve.mjs
 ```
 
-Open <http://localhost:8080>. Until you connect a database (below) the site runs in **demo mode**: a few fake players, and everything is saved only in your own browser.
+Open <http://localhost:8080>. Until you connect a database (below) the site runs in **demo mode**: a few fake players, and everything is saved only in your own browser. Even after you've connected one, adding **`?demo`** to the address (e.g. `http://localhost:8080/?demo`) gives you that private demo copy to try things out without touching the real data.
 
 ## Put it online for the group
 
@@ -45,6 +45,18 @@ Reload the site and the demo banner is gone: you're talking to the real database
 2. In the repo: **Settings → Pages → Build and deployment → Deploy from a branch → `main` / `(root)` → Save.**
 3. After a minute the site is live at `https://<your-username>.github.io/<repo-name>/`. Drop that link in the WhatsApp group.
 
+### 3. Become the admin (to remove players)
+
+Removing a player needs real proof of who you are, and a password hidden in a web page isn't proof (anyone can read the page's code). So the admin signs in with Google, and the database rules only let signed-in admins delete players. One-time setup:
+
+1. Firebase console → **Build → Authentication → Get started → Sign-in method → Google → Enable.** Pick your email as the support email and **Save**.
+2. **Authentication → Settings → Authorized domains → Add domain**, and add the domain the site lives on (`<your-username>.github.io`). `localhost` is already allowed.
+3. Publish the updated [`firestore.rules`](firestore.rules) again (Firestore Database → **Rules** → paste → **Publish**).
+4. Open the site, click **Admin sign-in** in the footer and sign in with Google. A dialog shows your user ID.
+5. In the Firebase console go to **Firestore Database → Data → Start collection**, name it `admins`, set the **Document ID** to your user ID, add any field (for example `note` = `owner`) and save. The site switches to admin mode by itself.
+
+In admin mode you get an **Admin** tag and an **X** next to everyone in "The crew". Removing someone takes them out of the crew **and off every day they picked**. Their game suggestions stay on the list (an admin can remove any game). To add another admin, add their user ID as another document in `admins`. Your email is never stored in the code or the repository.
+
 ## How people use it
 
 - **First visit:** pick your name from the list, or add yourself (type a name, choose a pixel face). Your device remembers you; tap your name in the top corner to edit your profile or switch player.
@@ -53,9 +65,9 @@ Reload the site and the demo banner is gone: you're talking to the real database
 
 ## Things to know
 
-- **No passwords.** Anyone with the link can use any name. That's the trade-off for zero sign-up; it's fine for friends, but don't put anything private in it. If it ever gets abused, the next step would be a shared group code or Firebase Authentication.
+- **No passwords for players.** Anyone with the link can use any name, and can edit anyone's days. That's the trade-off for zero sign-up; it's fine for friends, but don't put anything private in it. Only the admin is verified (Google sign-in), and only for removing players.
 - **Game search is local.** BoardGameGeek's API now requires a private token and blocks browser requests, so the site ships with a compact index of ~14,000 BGG games ([`data/games.json`](data/games.json), built from a public daily ranking dump). A game that isn't in the index can still be added by name (its link opens a BGG search), or by pasting its BGG link. To refresh the index: `node tools/update-games.mjs`.
-- **Removing people or old data:** do it in the Firebase console (Firestore Database → `players` / `days`). The app can't delete players.
+- **Removing people:** the admin does it from the site (see above). Old days can be tidied in the Firebase console (Firestore Database → `days`).
 
 ## Customising
 

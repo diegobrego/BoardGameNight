@@ -38,13 +38,16 @@
     </main>
 
     <footer class="foot">
-      Game links go to <a href="https://boardgamegeek.com" target="_blank" rel="noopener noreferrer">BoardGameGeek</a>. Not affiliated with BGG.
+      <p>Game links go to <a href="https://boardgamegeek.com" target="_blank" rel="noopener noreferrer">BoardGameGeek</a>. Not affiliated with BGG.</p>
+      <p id="admin-slot" class="foot-admin"></p>
     </footer>
   </div>
 
   <div id="savebar" class="savebar" hidden></div>
   <dialog id="day-dialog" class="sheet" aria-labelledby="dp-title"></dialog>
   <dialog id="who-dialog" class="sheet"></dialog>
+  <dialog id="confirm-dialog" class="sheet"></dialog>
+  <dialog id="admin-dialog" class="sheet"></dialog>
   <div id="toast" popover="manual" role="status" aria-live="polite"></div>
 
   <script type="module" src="js/app.js"></script>
