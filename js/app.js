@@ -853,7 +853,7 @@ function renderDayPanel() {
       ${foldable
     ? `<button type="button" class="fold-head" data-action="toggle-fold" data-fold="dp-games" data-default="${startOpen ? 1 : 0}" aria-expanded="${open}" aria-controls="dp-list"><span class="h-small">Game options <span class="count">${games.length}</span></span>${icon('chevron', 2)}</button>`
     : `<h3 class="h-small">Game options <span class="count">0</span></h3>`}
-      <button type="button" class="icon-btn icon-btn--small" data-action="game-night-info" aria-label="How game nights work" title="How game nights work">${icon('help', 2)}</button>
+      <button type="button" class="help-btn" data-action="game-night-info" aria-label="How game nights work" title="How game nights work">?</button>
     </div>
     ${canSuggest || past ? '' : '<p class="muted">Ideas open up once someone is available.</p>'}`;
 
