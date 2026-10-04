@@ -474,50 +474,61 @@ a.btn { text-decoration: none; }
 .head-row .fold-head { flex: 1; width: auto; }
 .head-row .fold-head[aria-expanded="false"] > .ico { transform: rotate(-90deg); }
 
+/* One game on a day's list (an experiment: git checkout css/style.css js/app.js goes back to the
+   committed version). A star badge (the top pick) sits above the vote button on the left; the
+   name and the face and name of whoever added it share the first line; who voted and who is
+   bringing it are on the second; the remove button, as tall as the vote button, is on the right. */
 .games { display: grid; gap: 8px; }
 .game {
-  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px;
-  padding: 8px;
+  display: grid; grid-template-columns: 46px minmax(0, 1fr) auto;
+  grid-template-areas: "badge head head" "vote meta remove";
+  align-items: center; column-gap: 10px; row-gap: 4px;
+  padding: 8px 10px;
   border: var(--bw) solid var(--line); border-radius: 12px;
 }
 .game.is-top { border-color: var(--solid); box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px var(--solid); }
-.game-main { display: grid; justify-items: start; gap: 4px; min-width: 0; }
+.game-badge {
+  grid-area: badge; display: grid; place-items: center; height: 26px;
+  background: var(--solid); color: var(--on-solid); border-radius: 8px;
+}
+.game-badge:empty { display: none; }
+.game-badge .ico { width: 16px; height: 16px; }
 .game-link { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; text-decoration: none; font-weight: 700; }
+/* the name and who added it stay on one line: a long name is cut short with an ellipsis (the full
+   name is the link's tooltip), so it never pushes the adder or the rest of the row around */
+.game-head { grid-area: head; display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
+.game-title { flex: 1 1 auto; flex-wrap: nowrap; min-width: 0; }
+.game-title .game-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .game-name { font-size: 19px; }
 .game-year { opacity: .6; font-weight: 400; }
-.game-by { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; opacity: .8; }
+.game-by { display: inline-flex; flex: none; align-items: center; gap: 6px; font-size: 14px; white-space: nowrap; opacity: .85; }
+.game-meta { grid-area: meta; display: grid; justify-items: start; gap: 4px; min-width: 0; }
 .game-voters { display: inline-flex; flex-wrap: wrap; gap: 3px; }
+.game > .icon-btn { grid-area: remove; align-self: stretch; width: 46px; height: auto; min-height: 52px; }   /* as tall as the vote button */
 
 /* voting: tap to vote for a game, tap again to take it back */
 .vote {
+  grid-area: vote; align-self: stretch;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  width: 50px; min-height: 54px; padding: 4px 0;
+  width: 46px; min-height: 52px; padding: 4px 0;
   background: var(--paper); color: var(--ink);
   border: var(--bw) solid var(--line); border-radius: 10px;
   font-weight: 800; line-height: 1.1;
 }
 .vote.is-on { background: var(--solid); color: var(--on-solid); }
 .vote.is-locked { opacity: .5; cursor: not-allowed; }   /* not available this day, so no vote */
-.top-pick {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 0 8px 0 6px;
-  background: var(--solid); color: var(--on-solid); border-radius: 7px;
-  font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
-}
-.top-pick .ico { width: 13px; height: 13px; }
 
-/* "I'll bring it" */
-.game-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+/* "I'll bring it" / "Mia is bringing it": one button, filled when you're bringing it too */
 .bring {
   display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px 2px 8px;
   background: var(--paper); color: var(--ink);
   border: 2px solid var(--line); border-radius: 8px;
-  font-size: 14px; font-weight: 700;
+  font-size: 14px; font-weight: 700; text-align: left;
 }
-.bring .ico { width: 16px; height: 16px; }
+.bring .ico { width: 16px; height: 16px; flex: none; }
 .bring.is-on { background: var(--solid); color: var(--on-solid); }
+.bring.is-others { background: color-mix(in srgb, var(--solid) 16%, var(--paper)); border-color: var(--solid); }
 .bring.is-locked { opacity: .5; cursor: not-allowed; }   /* not available this day, so no bringing */
-.game-brings { font-size: 14px; }
 
 /* where and when, plus the buttons under it */
 .details { display: grid; gap: 6px; }

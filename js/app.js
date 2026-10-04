@@ -811,26 +811,31 @@ function renderDayPanel() {
     const bringing = !!state.me && bringers.includes(state.me);
     const top = ranked.length > 1 && topVotes > 0 && voters.length === topVotes;
     const locked = canAct ? '' : ` aria-disabled="true" title="${lockedTitle}"`;
+    // One button says who is bringing the game ("I'll bring it" while nobody is). It is yours to
+    // tap either way: filled when you're one of them, tinted when only others are.
+    const bringLabel = bringers.length
+      ? `${listNames(bringers)} ${bringers.length === 1 ? 'is' : 'are'} bringing it`
+      : "I'll bring it";
+    const bringTip = canAct ? (bringing ? 'Tap to stop bringing it' : bringers.length ? 'Tap to bring it too' : 'Tap to say you will bring it') : lockedTitle;
     return `
         <li class="game${top ? ' is-top' : ''}">
+          <span class="game-badge">${top ? `${icon('star', 2)}<span class="sr-only">Top pick</span>` : ''}</span>
+          <div class="game-head">
+            <a class="game-link game-title" title="${esc(g.name)}" href="${g.id ? bggUrl(g.id) : bggSearchUrl(g.name)}" target="_blank" rel="noopener noreferrer">
+              <span class="game-name">${esc(g.name)}</span>${icon('arrow', 2)}
+              <span class="sr-only">(opens BoardGameGeek)</span>
+            </a>
+            ${by ? `<span class="game-by" title="Added by ${esc(by.name)}"><span class="sr-only">Added by </span>${avatar(by.avatar, 20)}<span>${esc(by.name)}</span></span>` : ''}
+          </div>
           <button type="button" class="vote${voted ? ' is-on' : ''}${canAct ? '' : ' is-locked'}" data-action="vote" data-gk="${esc(k)}" aria-pressed="${voted}"${locked}
             aria-label="${voted ? 'Take back your vote for' : 'Vote for'} ${esc(g.name)} (${plural(voters.length, 'vote')} so far)">
             ${icon('up', 2)}<span>${voters.length}</span>
           </button>
-          <div class="game-main">
-            <a class="game-link" href="${g.id ? bggUrl(g.id) : bggSearchUrl(g.name)}" target="_blank" rel="noopener noreferrer">
-              <span class="game-name">${esc(g.name)}</span>${g.year ? `<span class="game-year">${g.year}</span>` : ''}${icon('arrow', 2)}
-              <span class="sr-only">(opens BoardGameGeek)</span>
-            </a>
-            ${top ? `<span class="top-pick">${icon('star', 2)}<span>Top pick</span></span>` : ''}
-            ${voters.length ? `<span class="game-voters"><span class="sr-only">Votes from:</span>${voters.map((id) => avatar(state.players[id].avatar, 20, state.players[id].name)).join('')}</span>` : ''}
-            <div class="game-actions">
-              <button type="button" class="bring${bringing ? ' is-on' : ''}${canAct ? '' : ' is-locked'}" data-action="bring" data-gk="${esc(k)}" aria-pressed="${bringing}"${locked}>
-                ${icon('box', 2)}<span>${bringing ? "I'm bringing it" : "I'll bring it"}</span>
-              </button>
-              ${bringers.length ? `<span class="game-brings">Brought by ${esc(listNames(bringers))}</span>` : ''}
-            </div>
-            ${by ? `<span class="game-by">added by ${avatar(by.avatar, 18)} ${esc(by.name)}</span>` : ''}
+          <div class="game-meta">
+            ${voters.length ? `<span class="game-voters"><span class="sr-only">Votes from:</span>${voters.map((id) => avatar(state.players[id].avatar, 22, state.players[id].name)).join('')}</span>` : ''}
+            <button type="button" class="bring${bringing ? ' is-on' : bringers.length ? ' is-others' : ''}${canAct ? '' : ' is-locked'}" data-action="bring" data-gk="${esc(k)}" aria-pressed="${bringing}"${locked || ` title="${bringTip}"`}>
+              ${icon('box', 2)}<span>${esc(bringLabel)}</span>
+            </button>
           </div>
           ${(g.by === state.me && !past) || state.admin.isAdmin ? `<button type="button" class="icon-btn" data-action="remove-game" data-gk="${esc(k)}" aria-label="Remove ${esc(g.name)}">${icon('x', 2)}</button>` : ''}
         </li>`;
