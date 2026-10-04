@@ -1,4 +1,4 @@
-import { MIN_PLAYERS, DAYS_AHEAD } from './config.js';
+import { MIN_PLAYERS, MIN_PLAYERS_FOR_IDEAS, DAYS_AHEAD, SITE_URL } from './config.js';
 import { createStore, isForcedDemo } from './store.js';
 import { avatar, randomSeed } from './avatar.js';
 import { icon, iconInner } from './icons.js';
@@ -99,6 +99,50 @@ function peopleOn(key) {
 }
 
 const changeCount = () => state.daysList.filter((d) => state.draft.has(d.key) !== savedMine(d.key)).length;
+
+// A day's games, most votes first (ties keep the order they were added). Votes from
+// players who no longer exist are ignored.
+function rankGames(key) {
+  const games = state.days[key]?.games ?? [];
+  const votes = state.days[key]?.votes ?? {};
+  const ranked = games
+    .map((g, i) => ({ g, i, voters: (votes[voteKey(g)] ?? []).filter((id) => state.players[id]).sort(byName) }))
+    .sort((a, b) => b.voters.length - a.voters.length || a.i - b.i);
+  return { ranked, topVotes: ranked[0]?.voters.length ?? 0 };
+}
+
+// "Top pick so far: Azul (2 votes)", or null while nobody has voted.
+function topPickLine(key) {
+  const { ranked, topVotes } = rankGames(key);
+  if (!topVotes) return null;
+  const leaders = ranked.filter((r) => r.voters.length === topVotes).map((r) => r.g.name);
+  return leaders.length === 1
+    ? `Top pick so far: ${leaders[0]} (${plural(topVotes, 'vote')})`
+    : `Tied at the top: ${leaders.join(', ')}`;
+}
+
+// "Mia, Leo and Zoe", or "Mia, Leo, Zoe, Sam and 2 more" once the list gets long.
+function listNames(ids, max = 4) {
+  const shown = ids.slice(0, max).map((id) => state.players[id].name);
+  if (ids.length > max) shown.push(`${ids.length - max} more`);
+  return new Intl.ListFormat('en-GB', { style: 'long', type: 'conjunction' }).format(shown);
+}
+
+// The messages the admin can send to the WhatsApp group. Nothing is sent from here:
+// the link opens WhatsApp with the text filled in, and the admin picks the chat and
+// taps send.
+function whatsappText(kind, day) {
+  const ids = savedIds(day.key).sort(byName);
+  const when = longLabel(day.date);
+  const pick = topPickLine(day.key);
+  const lines = kind === 'remind'
+    ? [`⏰ Game night ${day.isToday ? 'today' : 'tomorrow'}! (${when})`, `In: ${listNames(ids, 99)}`]
+    : [`🎲 Game night on ${when}?`, `Free so far: ${listNames(ids, 99)}`];
+  if (pick) lines.push(pick);
+  lines.push(kind === 'remind' ? `Details and votes: ${SITE_URL}` : `Pick your days and vote: ${SITE_URL}`);
+  return lines.join('\n');
+}
+const whatsappLink = (text) => `https://wa.me/?text=${encodeURIComponent(text)}`;
 
 let toastTimer;
 function toast(message) {
@@ -247,8 +291,43 @@ function renderCrew() {
     : '<p class="muted">Nobody has joined yet. Be the first!</p>'}`;
 }
 
+// Admin only. It's a convenience rather than a lock (the link just fills in a WhatsApp
+// message that anyone could write), so it keeps the buttons off everyone else's screen.
+// For today and tomorrow it's a reminder; for later days it announces the game night.
+function whatsappButton(day, extraClass = '') {
+  const soon = day.isToday || day.key === state.daysList[1]?.key;
+  const link = whatsappLink(whatsappText(soon ? 'remind' : 'announce', day));
+  return `<a class="btn ${extraClass}" href="${esc(link)}" target="_blank" rel="noopener noreferrer" title="Opens WhatsApp with a ready-made message">${soon ? 'Remind the group' : 'Tell the group'} ${icon('arrow', 2)}</a>`;
+}
+
+// The orange banner: shown to everyone when today or tomorrow has enough players free.
+function renderReminder() {
+  const el = $('#reminder');
+  const soon = state.ready
+    ? state.daysList.slice(0, 2).filter((d) => savedIds(d.key).length >= MIN_PLAYERS)
+    : [];
+  el.hidden = !soon.length;
+  el.innerHTML = soon.map((d) => {
+    const ids = savedIds(d.key).sort(byName);
+    const pick = topPickLine(d.key);
+    return `
+      <div class="reminder-item">
+        <span class="reminder-icon">${icon('bell', 3)}</span>
+        <p class="reminder-text">
+          <strong>Game night ${d.isToday ? 'today' : 'tomorrow'}!</strong>
+          ${esc(longLabel(d.date))}. ${esc(listNames(ids))} ${ids.length === 1 ? 'is' : 'are'} free${savedMine(d.key) ? " (you're in)" : ''}.${pick ? ` ${esc(pick)}.` : ''}
+        </p>
+        <span class="reminder-actions">
+          <button type="button" class="btn btn--small" data-action="open-day" data-date="${d.key}">See the day</button>
+          ${state.admin.isAdmin ? whatsappButton(d, 'btn--small') : ''}
+        </span>
+      </div>`;
+  }).join('');
+}
+
 function renderAll() {
   renderHeader();
+  renderReminder();
   renderFooter();
   renderToolbar();
   renderCalendar();
@@ -333,7 +412,8 @@ function renderDayPanel() {
   const day = state.daysList.find((d) => d.key === key);
   if (!day) return;
   const ids = savedIds(key).sort(byName);
-  const go = ids.length >= MIN_PLAYERS;
+  const go = ids.length >= MIN_PLAYERS;                         // a real game night: green, "Game on"
+  const canSuggest = ids.length >= MIN_PLAYERS_FOR_IDEAS;       // ideas can be added and voted on
   const mine = savedMine(key);
   const games = state.days[key]?.games ?? [];
 
@@ -344,19 +424,17 @@ function renderDayPanel() {
     ${ids.length
     ? `<ul class="people">${ids.map((id) => `<li>${avatar(state.players[id].avatar, 32)}<span>${esc(state.players[id].name)}${id === state.me ? ' <em>(you)</em>' : ''}</span></li>`).join('')}</ul>`
     : '<p class="muted">Nobody yet.</p>'}
-    <button type="button" class="btn${mine ? '' : ' btn--solid'}" data-action="toggle-me">${mine ? "I can't make it" : "I'm free this day"}</button>`;
+    <button type="button" class="btn${mine ? '' : ' btn--solid'}" data-action="toggle-me">${mine ? "I can't make it" : "I'm free this day"}</button>
+    ${state.admin.isAdmin && go ? whatsappButton(day) : ''}`;
 
   $('#dp-games-head').innerHTML = `
     <h3 class="h-small">Game options <span class="count">${games.length}</span></h3>
-    ${go ? '' : `<p class="lock">${icon('star', 2)} Unlocks when ${MIN_PLAYERS}+ players are free (${ids.length}/${MIN_PLAYERS}).</p>`}`;
+    ${!canSuggest
+    ? `<p class="lock">${icon('star', 2)} Game ideas unlock when ${MIN_PLAYERS_FOR_IDEAS} or more players are free (${ids.length}/${MIN_PLAYERS_FOR_IDEAS}).</p>`
+    : go ? ''
+      : `<p class="lock">It's a game night once ${MIN_PLAYERS} players are free (${ids.length}/${MIN_PLAYERS}). Add ideas now, and others can join if they like them.</p>`}`;
 
-  // Most votes first; games with the same number of votes keep the order they were added.
-  // Votes from players who no longer exist are ignored.
-  const votes = state.days[key]?.votes ?? {};
-  const ranked = games
-    .map((g, i) => ({ g, i, voters: (votes[voteKey(g)] ?? []).filter((id) => state.players[id]).sort(byName) }))
-    .sort((a, b) => b.voters.length - a.voters.length || a.i - b.i);
-  const topVotes = ranked[0]?.voters.length ?? 0;
+  const { ranked, topVotes } = rankGames(key);
 
   $('#dp-list').innerHTML = ranked.length
     ? ranked.map(({ g, voters }) => {
@@ -382,9 +460,9 @@ function renderDayPanel() {
           ${g.by === state.me || state.admin.isAdmin ? `<button type="button" class="icon-btn" data-action="remove-game" data-gk="${esc(k)}" aria-label="Remove ${esc(g.name)}">${icon('x', 2)}</button>` : ''}
         </li>`;
     }).join('')
-    : go ? '<li class="muted">No games yet. Add the first one!</li>' : '';
+    : canSuggest ? '<li class="muted">No games yet. Add the first one!</li>' : '';
 
-  $('#dp-add').hidden = !go;
+  $('#dp-add').hidden = !canSuggest;
 }
 
 async function toggleMe() {
@@ -744,6 +822,7 @@ const actions = {
   'cancel-pick': () => { state.mode = 'view'; renderAll(); },
   'save-pick': savePick,
   day: (el) => (state.mode === 'pick' ? toggleDraft(el.dataset.date) : openDay(el.dataset.date)),
+  'open-day': (el) => openDay(el.dataset.date),
   'toggle-me': toggleMe,
   'adder-open': openAdder,
   'adder-close': closeAdder,

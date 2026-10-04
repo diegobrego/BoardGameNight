@@ -13,7 +13,14 @@ function seed() {
   names.forEach((name, i) => { players[`demo${i}`] = { id: `demo${i}`, name, avatar: randomSeed() }; });
   const keys = upcomingDays(7).map((d) => d.key);
   const days = {
-    [keys[1]]: { players: ['demo0', 'demo1'], games: [] },
+    // tomorrow: enough players, so the reminder banner shows
+    [keys[1]]: { players: ['demo0', 'demo1', 'demo2'], games: [] },
+    // one short of a game night, but ideas are already welcome
+    [keys[2]]: {
+      players: ['demo1', 'demo2'],
+      games: [{ id: 266192, name: 'Wingspan', year: 2019, by: 'demo1' }],
+      votes: { g266192: ['demo2'] },
+    },
     [keys[3]]: {
       players: ['demo0', 'demo1', 'demo2'],
       games: [

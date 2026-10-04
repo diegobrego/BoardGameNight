@@ -15,8 +15,17 @@ export const firebaseConfig = {
   appId: "1:85012025970:web:e0f5d1c1818607402728eb",
 };
 
-// How many free players it takes for a day to light up (and unlock game options).
-export const MIN_PLAYERS = 2;
+// How many free players it takes for a day to be "game on": the green marking, the
+// "Game on" tag and the orange reminder banner.
+export const MIN_PLAYERS = 3;
+
+// How many free players it takes before people can add and vote on game ideas for a
+// day. Lower than MIN_PLAYERS, so ideas can start early and others can join if they
+// like what they see.
+export const MIN_PLAYERS_FOR_IDEAS = 1;
 
 // How many days the calendar shows, starting today.
 export const DAYS_AHEAD = 14;
+
+// The public address of the site. The WhatsApp messages the admin sends link to it.
+export const SITE_URL = 'https://diegobrego.github.io/BoardGameNight/';

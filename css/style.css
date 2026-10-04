@@ -14,6 +14,8 @@
   --on-solid: #ffffff;      /* text on --solid */
   --go: #20c45a;            /* "game on": the one non-purple colour */
   --on-go: #06230f;         /* text on --go */
+  --alert: #ff9f1c;         /* orange: the game-night reminder banner (same in both themes) */
+  --on-alert: #2a1500;      /* text on --alert */
   --face-bg: #f6f2ff;       /* avatar plates stay light in both themes */
   --face-ink: #1a1033;
 
@@ -96,6 +98,25 @@ a { color: inherit; }
   background: var(--paper);
   border: var(--bw) dashed var(--line); border-radius: 12px;
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+}
+
+/* "Game night tomorrow": orange, so it can't be mistaken for anything else on the page */
+.reminder { display: grid; gap: 10px; margin-top: 14px; }
+.reminder[hidden] { display: none; }
+.reminder-item {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+  padding: 10px 14px;
+  background: var(--alert); color: var(--on-alert);
+  border: var(--bw) solid var(--on-alert); border-radius: 14px;
+  box-shadow: 4px 4px 0 var(--shadow);
+}
+.reminder-icon { display: grid; place-items: center; flex: none; }
+.reminder-text { flex: 1 1 220px; min-width: 0; }
+.reminder-text strong { display: block; font-size: 18px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.reminder-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.reminder .btn {
+  background: var(--on-alert); color: #fff; border-color: var(--on-alert);
+  box-shadow: 3px 3px 0 rgb(0 0 0 / .3);
 }
 
 .board {
@@ -467,6 +488,7 @@ input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; d
   .chip:hover { background: var(--on-solid); color: var(--solid); border-color: var(--on-solid); }
   .result:hover, .person-btn:hover, .cand:hover { background: var(--solid); color: var(--on-solid); }
   .game-link:hover .game-name { text-decoration: underline; text-underline-offset: 3px; }
+  .reminder .btn:hover:not(:disabled) { background: transparent; color: var(--on-alert); }
   .vote:hover { background: var(--solid); color: var(--on-solid); }
   .vote.is-on:hover { background: var(--paper); color: var(--ink); }
 

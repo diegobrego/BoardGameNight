@@ -1,6 +1,6 @@
 # Board Game Night
 
-A tiny website for a board game group. Everyone picks the days they're free over the next two weeks, days with 2+ free players light up green, and on those days the group can pile up game options with links to BoardGameGeek.
+A tiny website for a board game group. Everyone picks the days they're free over the next two weeks, days with 3+ free players light up green as a game night, and anyone can already float game ideas (with links to BoardGameGeek) once a single person is free.
 
 Plain HTML/CSS/JS, no build step, hosted for free on GitHub Pages. Look: a Playdate feel (dither patterns, hard shadows, pixel-art player faces) in purple, with a rounded easy-to-read font and crisp vector icons. There's a **light and a dark theme**: it follows the device by default, and the sun/moon button in the header switches it (and remembers the choice). Green is reserved for "game on" days.
 
@@ -61,7 +61,10 @@ In admin mode you get an **Admin** tag and an **X** next to everyone in "The cre
 
 - **First visit:** pick your name from the list, or add yourself (type a name, choose a pixel face). Your device remembers you; tap your name in the top corner to edit your profile or switch player.
 - **Pick my days:** tap every day you can play, then **Save**. Green days update live as you tick them.
-- **Green days** (2+ free players, set by `MIN_PLAYERS`) are marked with a green double border and a **Game on** tag. Tap one to see who's in and to add game options with the **+** button. Games link to their BoardGameGeek page.
+- **Game ideas:** tap any day with at least one free player (`MIN_PLAYERS_FOR_IDEAS`) to see who's in and add game ideas with the **+** button. Games link to their BoardGameGeek page. Posting an idea early lets others decide to join if they like it.
+- **Green days** (3+ free players, set by `MIN_PLAYERS`) are marked with a green double border and a **Game on** tag: that's a game night.
+- **Reminder banner:** when today or tomorrow is a game night, an orange banner at the top of the site says so for everyone.
+- **WhatsApp (admin only):** the signed-in admin sees a **Remind the group** button on that banner, and a **Remind the group** / **Tell the group** button on a game night's day panel. It opens WhatsApp with a ready-made message (who's in, the top-voted game, and a link to the site); the admin picks the group and taps send. Nothing is sent automatically, and WhatsApp doesn't allow a website to post into an existing group by itself. Keeping the buttons admin-only just keeps them off everyone else's screen, since anyone could write the same message by hand.
 
 - **Voting:** every game on a day has an up-arrow button. Tap it for each game you'd be happy to play (tap again to take the vote back; you can vote for several). The list sorts by votes, shows who voted, and the leader gets a **Top pick** tag. Removing a game removes its votes.
 
@@ -77,7 +80,8 @@ In admin mode you get an **Admin** tag and an **X** next to everyone in "The cre
 
 | What | Where |
 | --- | --- |
-| Players needed for a "game on" day, number of days shown | [`js/config.js`](js/config.js) (`MIN_PLAYERS`, `DAYS_AHEAD`) |
+| Players needed for a "game on" day, players needed before ideas can be added, number of days shown | [`js/config.js`](js/config.js) (`MIN_PLAYERS`, `MIN_PLAYERS_FOR_IDEAS`, `DAYS_AHEAD`) |
+| The site address used in WhatsApp messages | [`js/config.js`](js/config.js) (`SITE_URL`) |
 | The colours: one palette per theme (`--solid` is the purple, `--go` the green) | the two token blocks at the top of [`css/style.css`](css/style.css) (`:root` is light, `:root[data-theme="dark"]` is dark) |
 | The font (currently [M PLUS Rounded 1c](https://fonts.google.com/specimen/M+PLUS+Rounded+1c)) | `--font` in [`css/style.css`](css/style.css) and the Google Fonts `<link>` in [`index.html`](index.html) |
 
