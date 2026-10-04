@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Board Game Night</title>
+  <meta name="description" content="Pick the days you're free, see when enough of us can play, and suggest games.">
+  <meta property="og:title" content="Board Game Night">
+  <meta property="og:description" content="Pick the days you're free, see when enough of us can play, and suggest games.">
+  <meta name="theme-color" content="#000000">
+  <link rel="icon" id="favicon" href="data:,">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400..700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <h1 class="brand"><span class="brand-icon" id="brand-icon"></span><span>Board Game Night</span></h1>
+      <div id="me-slot"></div>
+    </header>
+
+    <div id="banner" class="banner" role="status" hidden></div>
+
+    <main>
+      <section class="board" aria-labelledby="board-title">
+        <div class="board-head">
+          <h2 id="board-title">Next 2 weeks</h2>
+          <span id="range" class="range"></span>
+        </div>
+        <div id="toolbar" class="toolbar"></div>
+        <div id="calendar" class="calendar"></div>
+        <ul id="legend" class="legend"></ul>
+      </section>
+
+      <section id="crew" class="crew" hidden></section>
+    </main>
+
+    <footer class="foot">
+      Game links go to <a href="https://boardgamegeek.com" target="_blank" rel="noopener noreferrer">BoardGameGeek</a>. Not affiliated with BGG.
+    </footer>
+  </div>
+
+  <div id="savebar" class="savebar" hidden></div>
+  <dialog id="day-dialog" class="sheet" aria-labelledby="dp-title"></dialog>
+  <dialog id="who-dialog" class="sheet"></dialog>
+  <div id="toast" popover="manual" role="status" aria-live="polite"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

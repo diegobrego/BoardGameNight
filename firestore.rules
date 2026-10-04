@@ -1,0 +1,32 @@
+rules_version = '2';
+
+// Paste this into Firebase console -> Firestore Database -> Rules -> Publish.
+//
+// The group has no passwords: anyone who has the site link can read and edit.
+// These rules keep that open door narrow: only the two kinds of documents the app
+// uses, in the shape it uses them, and nothing can be deleted.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /players/{playerId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasOnly(['name', 'avatar', 'createdAt'])
+                            && request.resource.data.name is string
+                            && request.resource.data.name.size() > 0
+                            && request.resource.data.name.size() <= 20
+                            && request.resource.data.avatar is number;
+      allow delete: if false;
+    }
+
+    // One document per calendar day, named like "2026-10-09".
+    match /days/{day} {
+      allow read: if true;
+      allow create, update: if day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+                            && request.resource.data.keys().hasOnly(['players', 'games'])
+                            && request.resource.data.get('players', []).size() <= 50
+                            && request.resource.data.get('games', []).size() <= 50;
+      allow delete: if false;
+    }
+  }
+}
