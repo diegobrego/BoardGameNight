@@ -45,7 +45,7 @@ Reload the site and the demo banner is gone: you're talking to the real database
 2. In the repo: **Settings → Pages → Build and deployment → Deploy from a branch → `main` / `(root)` → Save.**
 3. After a minute the site is live at `https://<your-username>.github.io/<repo-name>/`. Drop that link in the WhatsApp group.
 
-### 3. Become the admin (to remove players)
+### 3. Become the admin (the Admin page, and removing players)
 
 Removing a player needs real proof of who you are, and a password hidden in a web page isn't proof (anyone can read the page's code). So the admin signs in with Google, and the database rules only let signed-in admins delete players. One-time setup:
 
@@ -56,6 +56,15 @@ Removing a player needs real proof of who you are, and a password hidden in a we
 5. In the Firebase console go to **Firestore Database → Data → Start collection**, name it `admins`, set the **Document ID** to your user ID, add any field (for example `note` = `owner`) and save. The site switches to admin mode by itself.
 
 In admin mode you get an **Admin** tag and an **X** next to everyone in "The crew". Removing someone takes them out of the crew **and off every day they picked** (their entries in the hall of fame stay, under the name they had). Admins can also remove entries from the hall of fame, and remove any campaign (a campaign's creator can remove their own too; its sessions stay in the hall of fame). Their game suggestions stay on the list (an admin can remove any game). To add another admin, add their user ID as another document in `admins`. Your email is never stored in the code or the repository.
+
+**The Admin page.** Once you're an admin, an **Admin** tab appears next to the others. Nobody else sees it: the tab is hidden, opening its address just shows the calendar, and the database only lets an admin edit or remove the things below. It has four parts:
+
+- **Players:** everyone in the crew, with how many coming days they picked, how many games are in their collection and how many campaigns they're in, and a **Remove** button (the same removal as the X in "The crew").
+- **Campaigns and upcoming games:** every campaign (running and finished), with **See** and **Remove**, and every game suggested for the next two weeks, with an X to take one off a day.
+- **Hall of fame:** every logged game, with **Edit** (change the date, game, who played, the winner, its campaign or its note) and **Remove**, plus **Add an entry** for a game night nobody logged, on any past date.
+- **Backup:** **Download backup** saves one JSON file with the players (and their collections), every day, the hall of fame and the campaigns. Admin accounts aren't in it. There's no restore button; it's a safety copy to keep somewhere safe.
+
+New admins are still added by hand, exactly as in the steps above (a document in the `admins` collection); the Admin page doesn't manage admin accounts.
 
 ## How people use it
 
@@ -87,14 +96,14 @@ In admin mode you get an **Admin** tag and an **X** next to everyone in "The cre
 
 ## Things to know
 
-- **When the rules change, re-publish them.** Some updates change [`firestore.rules`](firestore.rules). Voting did (days can store `votes`), and so did "I'll bring it", the location and time, and the hall of fame (days can store `brings` and `details`, and there's a new `plays` collection). Campaigns did too (a new `campaigns` collection with people, a lock and a next day, and a note and a campaign link on logged games), and so did "My collection" (players can store a `games` list; until you re-publish, saving a list fails, and everything else keeps working). After pulling such an update, paste the file into Firebase console → Firestore Database → **Rules** and **Publish**. Until you do, those features fail to save, and the Hall of fame and Campaigns pages say they can't be loaded; the calendar itself keeps working.
+- **When the rules change, re-publish them.** Some updates change [`firestore.rules`](firestore.rules). Voting did (days can store `votes`), and so did "I'll bring it", the location and time, and the hall of fame (days can store `brings` and `details`, and there's a new `plays` collection). Campaigns did too (a new `campaigns` collection with people, a lock and a next day, and a note and a campaign link on logged games), and so did editing hall-of-fame entries (an admin can now update a `plays` entry), and "My collection" (players can store a `games` list; until you re-publish, saving a list fails, and everything else keeps working). After pulling such an update, paste the file into Firebase console → Firestore Database → **Rules** and **Publish**. Until you do, those features fail to save, and the Hall of fame and Campaigns pages say they can't be loaded; the calendar itself keeps working.
 - **No passwords for players.** Tapping a name in "Who are you?" makes that device that person, and from then on it can change that person's days and profile (name and face) for everyone. The site asks "Are you …?" first, but that's a speed bump, not a lock. It's the trade-off for zero sign-up: fine for friends, but don't put anything private in it. Only the admin is verified (Google sign-in), and only for removing players. The same goes for "creator only" in a campaign (locking, adding people once it's locked, finishing, reopening, removing): the site only shows those buttons to the creator, but the database can't tell who is who, so it's a courtesy, not a lock. A signed-in admin can run any campaign. A real lock would mean player accounts (for example Google sign-in per player).
 - **If someone ends up as you by mistake:** they tap their name at the top → **Edit profile** → **Switch player** → **I'm new here**. Then you change your own name and face back the same way.
 - **Game search is local.** BoardGameGeek's API now requires a private token and blocks browser requests, so the site ships with a compact index of ~14,000 BGG games ([`data/games.json`](data/games.json), built from a public daily ranking dump). A game that isn't in the index can still be added by name (its link opens a BGG search), or by pasting its BGG link. To refresh the index: `node tools/update-games.mjs`.
 - **Removing people:** the admin does it from the site (see above). Old days can be tidied in the Firebase console (Firestore Database → `days`).
-- **Fixing a hall-of-fame mistake:** entries can't be edited. The admin sees a small **X** on each entry to remove a wrong one (then log it again); without the admin set-up, delete it in the Firebase console (Firestore Database → `plays`).
+- **Fixing a hall-of-fame mistake:** the admin opens **Admin → Hall of fame** and taps **Edit** on the entry (or **Remove**, then logs it again). Without the admin set-up, edit or delete it in the Firebase console (Firestore Database → `plays`).
 - **If the site looks out of date** (a new tab is missing, a button hasn't changed): the page you're looking at is an old copy that was cached or left open. Reload it with **Ctrl+Shift+R** (**Cmd+Shift+R** on a Mac). The installed app doesn't reload by itself, so close and reopen its window. If a reload still shows the old version, clear the site's data in the browser's settings (you'll be asked "who are you?" again; the calendar data is safe, it lives in the shared database). From now on the site also checks for a new version whenever you come back to it after a while, and shows **A new version of the site is ready** with a **Reload** button. (GitHub Pages tells browsers to keep files for 10 minutes; the service worker now asks the server every time instead, so a reload always gets the latest.)
-- **Tests:** `node tools/test.mjs` checks the calendar file, the hall-of-fame numbers, the player stats and titles, the campaign helpers and who may do what in a campaign, the collection and favourites, the help page's links, the "last week" dates and the service worker (no browser or install needed).
+- **Tests:** `node tools/test.mjs` checks the calendar file, the hall-of-fame numbers, the player stats and titles, the campaign helpers and who may do what in a campaign, the collection and favourites, the help page's links, the Admin page's backup file and entry editing, the "last week" dates and the service worker (no browser or install needed).
 
 ## Customising
 
@@ -121,6 +130,7 @@ js/icons.js           vector icons
 js/ics.js             builds the "Add to calendar" file
 js/hall.js            hall-of-fame rankings, player stats and titles
 js/campaigns.js       small helpers for campaigns (sessions, who may do what)
+js/admin.js           small helpers for the Admin page (backup file, editing an entry)
 js/help.js            icons and the dark-mode button on the help page
 js/mygames.js         small helpers for a player's game collection (favourites, ordering)
 manifest.webmanifest  makes the site installable (name, icons, colours)

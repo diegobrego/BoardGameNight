@@ -935,3 +935,62 @@ html { scroll-behavior: smooth; }
 @media (hover: hover) { .help-link:hover { background: var(--on-solid); color: var(--solid); } }
 /* the help page reads better as a narrower column than the calendar's wide board */
 .help-page { max-width: 780px; }
+
+/* ---------------------------------------------------------------- admin page */
+
+/* The Admin page is slate, so it's obvious you're in the owner's corner. */
+:root[data-page="admin"] {
+  --bg: #dfe5ee;
+  --paper: #f8fafc;
+  --ink: #0f172a;
+  --line: #0f172a;
+  --shadow: #0f172a;
+  --solid: #334155;
+  --on-solid: #ffffff;
+  --pill-s: 90%; --pill-l: 91%;
+  --dots-light: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4' fill='%2394a3b8'%3E%3Crect x='0' y='0' width='1' height='1'/%3E%3Crect x='2' y='2' width='1' height='1'/%3E%3C/svg%3E");
+  --dots-mid: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4' fill='%2394a3b8'%3E%3Crect x='0' y='0' width='1' height='1'/%3E%3Crect x='2' y='0' width='1' height='1'/%3E%3Crect x='0' y='2' width='1' height='1'/%3E%3Crect x='2' y='2' width='1' height='1'/%3E%3C/svg%3E");
+}
+:root[data-theme="dark"][data-page="admin"] {
+  --bg: #0a101c;
+  --paper: #121b2d;
+  --ink: #e2e8f0;
+  --line: #94a3b8;
+  --shadow: #334155;
+  --solid: #64748b;
+  --on-solid: #0b1220;
+  --pill-s: 24%; --pill-l: 22%;
+}
+:root[data-page="admin"] .sheet::backdrop { background-color: rgb(223 229 238 / .8); }
+:root[data-theme="dark"][data-page="admin"] .sheet::backdrop { background-color: rgb(6 10 18 / .78); }
+.admin .board-head h2 { display: flex; align-items: center; gap: 10px; }
+.admin .board-head h2 .ico { width: 30px; height: 30px; color: var(--solid); }
+
+.admin-intro { margin: 12px 0 0; }
+#admin-body > .fold { margin-top: 16px; }
+.adm-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.adm-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+  padding: 6px 8px 6px 12px; border: var(--bw) solid var(--line); border-radius: 10px;
+}
+.adm-main { display: grid; flex: 1 1 200px; gap: 2px; min-width: 0; }
+.adm-main strong { font-weight: 800; }
+.adm-sub { font-size: 14px; opacity: .75; }
+.adm-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.adm-head { margin: 12px 0 6px; }
+.adm-head:first-child { margin-top: 0; }
+.adm-day { display: grid; gap: 6px; padding: 8px 10px; border: var(--bw) solid var(--line); border-radius: 10px; }
+.adm-day-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: 800; }
+.adm-games { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.adm-games li { display: flex; align-items: center; gap: 8px; }
+.adm-games .game-link { flex: 1; min-width: 0; }
+.adm-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 10px; }
+.adm-status { padding: 8px 12px; border: var(--bw) dashed var(--line); border-radius: 10px; }
+.adm-form select, .adm-form input[type="date"] { max-width: 100%; }
+input[type="date"] {
+  width: 100%; padding: 9px 12px; font: inherit; color: var(--ink); background: var(--paper);
+  border: var(--bw) solid var(--line); border-radius: 10px;
+}
+
+.adm-form { display: grid; gap: 16px; }
+.adm-main > .pill { justify-self: start; }

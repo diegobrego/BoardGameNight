@@ -10,6 +10,7 @@ import { pastDays, upcomingDays } from '../js/dates.js';
 import { sessionsOf, plannedOn, campaignRecord, sortCampaigns, defaultTitle, can, outsiders } from '../js/campaigns.js';
 import { MAX_MY_GAMES, hasGame, withGame, withoutGame, toggleFav, ordered, matchMine } from '../js/mygames.js';
 import { voteKey } from '../js/games.js';
+import { toPlain, buildBackup, backupName, withoutUndefined, buildPlay } from '../js/admin.js';
 
 const encoder = new TextEncoder();
 const root = new URL('..', import.meta.url);
@@ -363,4 +364,44 @@ const root = new URL('..', import.meta.url);
     assert.ok(help.includes(topic), `the tutorial mentions "${topic}"`);
   }
   console.log('ok  help page');
+}
+
+// ---- the admin page: backup file, and editing a hall-of-fame entry -----------------------
+{
+  // timestamps become text, wherever they sit; everything else is untouched
+  const stamp = { toMillis: () => Date.UTC(2026, 9, 4, 12, 0, 0) };
+  assert.deepEqual(toPlain({ a: stamp, b: [stamp, 1], c: { d: 'x', e: null } }), { a: '2026-10-04T12:00:00.000Z', b: ['2026-10-04T12:00:00.000Z', 1], c: { d: 'x', e: null } });
+
+  const now = new Date(Date.UTC(2026, 9, 4, 18, 30));
+  const backup = buildBackup({ players: { p1: { name: 'Mia' } }, days: { '2026-10-05': {}, '2026-10-06': {} }, plays: [{ id: 'a' }], campaigns: [] }, now);
+  assert.deepEqual(backup.counts, { players: 1, days: 2, plays: 1, campaigns: 0 });
+  assert.equal(backup.exportedAt, '2026-10-04T18:30:00.000Z');
+  assert.equal(backup.app, 'board-game-night');
+  assert.deepEqual(Object.keys(backup).filter((k) => ['admins', 'adminRequests'].includes(k)), [], 'admin accounts are not in a backup');
+  assert.equal(buildBackup({}).counts.plays, 0, 'an empty site still makes a valid backup');
+  assert.equal(backupName(now), 'board-game-night-backup-2026-10-04.json');
+  assert.deepEqual(withoutUndefined({ a: 1, b: undefined, c: null }), { a: 1, c: null }, 'null stays, undefined goes');
+
+  // the edit form
+  const nameOf = (id) => ({ p1: 'Mia', p2: 'Leo' }[id] ?? id);
+  const good = { date: '2026-10-01', game: { id: 13, name: ' Catan ', year: 1995 }, players: new Set(['p1', 'p2']), winner: 'p2', campaign: '', note: '  a   close   one ' };
+  const ok = buildPlay(good, { today: '2026-10-04', nameOf });
+  assert.deepEqual(ok.play, {
+    date: '2026-10-01', game: { id: 13, name: 'Catan', year: 1995 }, winner: 'p2', players: ['p1', 'p2'],
+    names: { p1: 'Mia', p2: 'Leo' }, note: 'a close one', campaign: undefined,
+  }, 'tidied up, with the names remembered');
+  assert.equal(buildPlay({ ...good, note: '' }, { nameOf }).play.note, undefined, 'a cleared note is marked for removal');
+  assert.equal(buildPlay({ ...good, winner: null }, { nameOf }).play.winner, null, 'nobody won is allowed');
+  assert.equal(buildPlay({ ...good, campaign: 'c1' }, { nameOf }).play.campaign, 'c1');
+  assert.equal(buildPlay({ ...good, game: { id: null, name: 'Homebrew' } }, { nameOf }).play.game.year, 0);
+
+  const err = (patch) => buildPlay({ ...good, ...patch }, { today: '2026-10-04', nameOf }).error;
+  assert.match(err({ date: '' }), /date/);
+  assert.match(err({ date: '2026-10-05' }), /hasn't happened/, 'not in the future');
+  assert.match(err({ game: { name: '  ' } }), /game/);
+  assert.match(err({ players: new Set() }), /players/);
+  assert.match(err({ winner: undefined }), /who won/);
+  assert.match(err({ winner: 'p3' }), /one of the players/, 'the winner has to have played');
+  assert.match(err({ note: 'x'.repeat(141) }), /note/);
+  console.log('ok  admin page');
 }

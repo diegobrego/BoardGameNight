@@ -25,6 +25,7 @@ import {
   arrayUnion, arrayRemove, deleteField, query, where, orderBy, limit, documentId, serverTimestamp,
 } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
 import { voteKey } from './games.js';
+import { toPlain } from './admin.js';
 
 export function create(config) {
   const app = initializeApp(config);
@@ -137,8 +138,23 @@ export function create(config) {
       return ref.id;
     },
 
+    // Admin only (the rules enforce it). `patch` holds just the fields that change; one set to
+    // `undefined` is removed from the entry (a cleared note, say).
+    updatePlay: (id, patch) => updateDoc(doc(playsCol, id), Object.fromEntries(
+      Object.entries(patch).map(([key, value]) => [key, value === undefined ? deleteField() : value]),
+    )),
+
     // Admin only (the rules enforce it).
     deletePlay: (id) => deleteDoc(doc(playsCol, id)),
+
+    // Everything the site stores, for the admin's backup download. (Reads are open, so this needs
+    // no special permission; only the Admin page offers it.) Admin accounts are not included.
+    async exportAll() {
+      const read = async (col) => (await getDocs(col)).docs.map((d) => ({ id: d.id, ...toPlain(d.data()) }));
+      const [players, days, plays, campaigns] = await Promise.all([read(playersCol), read(daysCol), read(playsCol), read(campaignsCol)]);
+      const byId = (rows) => Object.fromEntries(rows.map(({ id, ...rest }) => [id, rest]));
+      return { players: byId(players), days: byId(days), plays, campaigns };
+    },
 
     // Campaigns: long games played over several sessions. A campaign's sessions are plays
     // (above) that carry the campaign's id. Like the hall of fame, this has its own listener.

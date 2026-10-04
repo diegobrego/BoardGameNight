@@ -7,6 +7,7 @@ import { buildIcs } from './ics.js';
 import { tally, ranked as rankList, newestFirst, playerStats, awardTitles } from './hall.js';
 import { sessionsOf, plannedOn, campaignRecord, sortCampaigns, defaultTitle, can, outsiders } from './campaigns.js';
 import { MAX_MY_GAMES, hasGame, withGame, withoutGame, toggleFav, ordered, matchMine } from './mygames.js';
+import { buildBackup, backupName, buildPlay, withoutUndefined } from './admin.js';
 import {
   loadGames, isLoaded, findGame, searchGames, bggUrl, bggSearchUrl, parseBggLink, titleFromSlug, voteKey,
 } from './games.js';
@@ -76,8 +77,15 @@ function loadFolds() {
 }
 const isOpen = (id, openByDefault = true) => state.folds[id] ?? openByDefault;
 
+// Whether this visitor is an admin: kept apart from `state` so it can be used while `state` is
+// still being built. The Admin page only exists for admins; anyone else asking for it gets the calendar.
+let adminOn = false;
+
 const viewFromHash = () => (
-  location.hash === '#hall' ? 'hall' : location.hash === '#campaigns' ? 'campaigns' : 'calendar'
+  location.hash === '#hall' ? 'hall'
+    : location.hash === '#campaigns' ? 'campaigns'
+      : location.hash === '#admin' && adminOn ? 'admin'
+        : 'calendar'
 );
 
 const state = {
@@ -94,7 +102,7 @@ const state = {
   daysList: [],              // the visible calendar days: today and the next two weeks
   pastDays: [],              // the week before today, for the "Last week" preview
   futureKeys: new Set(),     // keys of daysList, so we know which days can still be edited
-  view: viewFromHash(),      // which page: 'calendar' | 'campaigns' | 'hall'
+  view: viewFromHash(),      // which page: 'calendar' | 'campaigns' | 'hall' | 'admin'
   campaigns: [],             // long games played over several sessions
   campaignsReady: false,
   campaignsError: false,     // campaigns couldn't be loaded (e.g. rules not updated yet)
@@ -106,6 +114,10 @@ const state = {
   start: null,               // state of the "Start a campaign" popup
   finish: null,              // state of the "Finish campaign" popup
   addPeople: null,           // state of the "Add players" popup of a campaign
+  edit: null,                // state of the admin's "edit a hall-of-fame entry" form
+  adminAllPlays: false,      // the Admin page lists every logged game, not just the newest
+  backupNote: '',            // what the last backup download contained
+  backupBusy: false,
   mode: 'view',              // 'view' | 'pick'
   draft: new Set(),          // day keys selected while picking
   saving: false,
@@ -236,6 +248,8 @@ function renderStatic() {
   $('#tab-calendar').innerHTML = `${icon('calendar', 2)}<span>Calendar</span>`;
   $('#tab-campaigns').innerHTML = `${icon('flag', 2)}<span>Campaigns</span>`;
   $('#tab-hall').innerHTML = `${icon('trophy', 2)}<span>Hall of fame</span>`;
+  $('#tab-admin').innerHTML = `${icon('shield', 2)}<span>Admin</span>`;
+  $('#admin-title').innerHTML = `${icon('shield', 3)}<span>Admin</span>`;
   $('#campaigns-title').innerHTML = `${icon('flag', 3)}<span>Campaigns</span>`;
   $('#hall-title').innerHTML = `${icon('trophy', 3)}<span>Hall of fame</span>`;
   applyTheme(preferredTheme(), false);   // also catches a device change that landed after the inline script ran
@@ -584,11 +598,13 @@ function leaderPreview(rows, unit) {
     leaders.length > 1 ? `<p class="muted fold-note">+${leaders.length - 1} more tied for first</p>` : ''}</div>`;
 }
 
-// Which page is showing. Each page has its own colours (purple, teal, gold), set by data-page.
+// Which page is showing. Each page has its own colours (purple, teal, gold, slate), set by data-page.
+// The Admin tab is only there for admins.
 function renderView() {
   const view = state.view;
   document.documentElement.dataset.page = view;
-  for (const page of ['calendar', 'campaigns', 'hall']) {
+  $('#tab-admin').hidden = !adminOn;
+  for (const page of ['calendar', 'campaigns', 'hall', 'admin']) {
     $(`#view-${page}`).hidden = page !== view;
     const tab = $(`#tab-${page}`);
     if (page === view) tab.setAttribute('aria-current', 'page');
@@ -614,6 +630,7 @@ function renderAll() {
   renderCrew();
   renderCampaigns();
   renderHall();
+  renderAdmin();
   renderDayPanel();
   renderMyGames();
 }
@@ -1835,7 +1852,7 @@ async function confirmAddPlayers() {
 function deleteCampaign(id) {
   const c = state.campaigns.find((x) => x.id === id);
   if (!c) return;
-  if (!myRights(c).remove) return toast(`Only ${playerName(c.createdBy)} can remove this campaign.`);
+  if (!myRights(c).remove && !adminOn) return toast(`Only ${playerName(c.createdBy)} can remove this campaign.`);
   askConfirm({
     title: `Remove ${c.title}?`,
     message: `The campaign disappears for everyone, and this can't be undone. Its ${plural(sessionsOf(state.plays, id).length, 'session')} stay in the hall of fame.`,
@@ -1908,6 +1925,288 @@ function openPlayerCard(id) {
       ${body}
     </div>`;
   $('#player-dialog').showModal();
+}
+
+// ---------------------------------------------------------------------------
+// admin page: the owner's overview and tools. Only admins see it (see viewFromHash), and the
+// database rules only let an admin edit or remove a hall-of-fame entry or remove a player.
+// ---------------------------------------------------------------------------
+
+const ADMIN_PLAYS_SHOWN = 25;
+
+const gameLink = (g) => `<a class="game-link" href="${esc(g.id ? bggUrl(g.id) : bggSearchUrl(g.name))}" target="_blank" rel="noopener noreferrer">
+  <span class="game-name">${esc(g.name)}</span>${g.year ? `<span class="game-year">${g.year}</span>` : ''}${icon('arrow', 2)}
+  <span class="sr-only">(opens BoardGameGeek)</span></a>`;
+
+function adminPlayers() {
+  const list = sortedPlayers();
+  if (!list.length) return '<p class="muted">Nobody has joined yet.</p>';
+  const days = state.daysList.length;
+  return `
+    <p class="muted">Removing someone takes them out of the crew and off every day they picked. Their logged games stay in the hall of fame, under the name they had.</p>
+    <ul class="adm-list">${list.map((p) => {
+    const upcoming = state.daysList.filter((d) => savedIds(d.key).includes(p.id)).length;
+    const camps = state.campaigns.filter((c) => c.players?.includes(p.id)).length;
+    return `
+      <li class="adm-row">
+        <div class="adm-main">${playerPill(p.id)}
+          <span class="adm-sub">Available on ${upcoming} of the next ${days} days · ${plural((p.games ?? []).length, 'game')} in their collection · in ${plural(camps, 'campaign')}</span>
+        </div>
+        <div class="adm-actions"><button type="button" class="btn btn--small" data-action="delete-player" data-id="${esc(p.id)}">${icon('x', 2)} Remove</button></div>
+      </li>`;
+  }).join('')}</ul>`;
+}
+
+function adminCampaigns() {
+  if (state.campaignsError) return '<p class="muted">Campaigns can\'t be loaded right now.</p>';
+  const { active, finished } = sortCampaigns(state.campaigns);
+  const all = [...active, ...finished];
+  if (!all.length) return '<p class="muted">No campaigns yet.</p>';
+  return `<ul class="adm-list">${all.map((c) => `
+    <li class="adm-row">
+      <div class="adm-main">
+        <strong>${esc(c.title)}</strong>
+        <span class="adm-sub">${esc(c.game.name)} · ${c.status === 'finished' ? 'finished' : c.locked ? 'running, locked' : 'running, open to join'} · ${plural(c.players.length, 'player')} · started by ${esc(playerName(c.createdBy))}${c.status !== 'finished' && c.next ? ` · next: ${esc(dateLabel(c.next))}` : ''}</span>
+      </div>
+      <div class="adm-actions">
+        <button type="button" class="btn btn--small" data-action="open-campaign" data-id="${esc(c.id)}">See ${icon('arrow', 2)}</button>
+        <button type="button" class="btn btn--small" data-action="campaign-delete" data-id="${esc(c.id)}">${icon('x', 2)} Remove</button>
+      </div>
+    </li>`).join('')}</ul>`;
+}
+
+function adminUpcomingGames() {
+  const days = state.daysList.filter((d) => (state.days[d.key]?.games ?? []).length);
+  if (!days.length) return '<p class="muted">Nobody has suggested a game for the next two weeks yet.</p>';
+  return `<div class="adm-list">${days.map((d) => `
+    <div class="adm-day">
+      <div class="adm-day-head"><span>${esc(longLabel(d.date))}${d.isToday ? ' (today)' : ''}</span>
+        <button type="button" class="btn btn--small" data-action="open-day" data-date="${d.key}">Open</button></div>
+      <ul class="adm-games">${rankGames(d.key).ranked.map(({ g, voters }) => `
+        <li>${gameLink(g)}
+          <span class="adm-sub">${plural(voters.length, 'vote')}${g.by ? ` · added by ${esc(playerName(g.by))}` : ''}</span>
+          <button type="button" class="icon-btn icon-btn--small" data-action="admin-remove-game" data-date="${d.key}" data-gk="${esc(voteKey(g))}" aria-label="Remove ${esc(g.name)} from this day">${icon('x', 2)}</button>
+        </li>`).join('')}</ul>
+    </div>`).join('')}</div>`;
+}
+
+function adminHall() {
+  if (state.playsError) return '<p class="muted">The hall of fame can\'t be loaded right now.</p>';
+  if (!state.playsReady) return '<p class="loading">Loading…</p>';
+  const plays = newestFirst(state.plays);
+  const shown = state.adminAllPlays ? plays : plays.slice(0, ADMIN_PLAYS_SHOWN);
+  return `
+    <div class="adm-tools">
+      <button type="button" class="btn btn--solid" data-action="play-add">${icon('plus', 2)} Add an entry</button>
+      <span class="muted">Fix a mistake, or add a game night nobody logged.</span>
+    </div>
+    ${plays.length ? `<ul class="adm-list">${shown.map((p) => `
+      <li class="adm-row">
+        <div class="adm-main">
+          <strong>${esc(p.game?.name ?? 'Unknown game')}</strong>
+          <span class="adm-sub">${esc(dateLabel(p.date))} · ${p.winner ? `${esc(playerName(p.winner))} won` : 'no winner'} · ${plural(p.players.length, 'player')}${p.note ? ` · “${esc(p.note)}”` : ''}</span>
+          ${p.campaign ? campaignTag(p) : ''}
+        </div>
+        <div class="adm-actions">
+          <button type="button" class="btn btn--small" data-action="play-edit" data-id="${esc(p.id)}">Edit</button>
+          <button type="button" class="btn btn--small" data-action="delete-play" data-id="${esc(p.id)}">${icon('x', 2)} Remove</button>
+        </div>
+      </li>`).join('')}</ul>` : '<p class="muted">Nothing logged yet.</p>'}
+    ${plays.length > ADMIN_PLAYS_SHOWN ? `<button type="button" class="btn btn--small" data-action="admin-plays-toggle">${state.adminAllPlays ? 'Show fewer' : `Show all ${plays.length}`}</button>` : ''}`;
+}
+
+function adminBackup() {
+  return `
+    <p>One file with everything the site stores: the players (and their collections), every day, the hall of fame and the campaigns. Admin accounts aren't in it.</p>
+    <div class="adm-tools">
+      <button type="button" class="btn btn--solid" data-action="admin-backup"${state.backupBusy ? ' disabled' : ''}>${icon('download', 2)} ${state.backupBusy ? 'Preparing…' : 'Download backup'}</button>
+    </div>
+    ${state.backupNote ? `<p class="adm-status" role="status">${esc(state.backupNote)}</p>` : ''}
+    <p class="muted">There's no restore button: the file is a safety copy to keep somewhere safe. If something is ever lost, everything needed to put it back is in there.</p>`;
+}
+
+function renderAdmin() {
+  const body = $('#admin-body');
+  if (!adminOn) { body.innerHTML = ''; return; }
+  if (state.view !== 'admin') return;       // nothing to draw while another page is showing
+  const players = Object.keys(state.players).length;
+  $('#admin-count').textContent = `${plural(players, 'player')} · ${plural(state.campaigns.length, 'campaign')} · ${plural(state.plays.length, 'logged game')}`;
+  body.innerHTML = `
+    <p class="admin-intro muted">Only admins can see this page. New admins are still added by hand in the Firebase console (see the README).</p>
+    ${fold('adm-players', 'Players', { count: players, body: adminPlayers() })}
+    ${fold('adm-upcoming', 'Campaigns and upcoming games', {
+    count: state.campaigns.length,
+    body: `<h3 class="h-small adm-head">All campaigns <span class="count">${state.campaigns.length}</span></h3>${adminCampaigns()}
+      <h3 class="h-small adm-head">Games suggested for the next two weeks</h3>${adminUpcomingGames()}`,
+  })}
+    ${fold('adm-hall', 'Hall of fame', { count: state.plays.length, open: false, body: adminHall() })}
+    ${fold('adm-backup', 'Backup', { body: adminBackup() })}`;
+}
+
+// A game somebody suggested for a coming day, taken off that day's list (with its votes).
+function adminRemoveGame(el) {
+  const key = el.dataset.date;
+  const game = (state.days[key]?.games ?? []).find((g) => voteKey(g) === el.dataset.gk);
+  if (!adminOn || !game) return;
+  askConfirm({
+    title: `Remove ${game.name}?`,
+    message: `It comes off ${dateLabel(key)}'s list, along with its votes.`,
+    label: 'Remove',
+    failMessage: "Couldn't remove the game. Please try again.",
+  }, async () => {
+    await state.store.removeGame(key, game);
+    toast('Game removed');
+  });
+}
+
+async function downloadBackup() {
+  if (!adminOn || state.backupBusy) return;
+  state.backupBusy = true;
+  renderAdmin();
+  try {
+    const now = new Date();
+    const backup = buildBackup(await state.store.exportAll(), now);
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }));
+    link.download = backupName(now);
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 5000);
+    const c = backup.counts;
+    state.backupNote = `Saved ${link.download}: ${plural(c.players, 'player')}, ${plural(c.days, 'day')}, ${plural(c.plays, 'logged game')}, ${plural(c.campaigns, 'campaign')}.`;
+  } catch (err) {
+    fail(err, "Couldn't make the backup. Please try again.");
+  } finally {
+    state.backupBusy = false;
+    renderAdmin();
+  }
+}
+
+// --- edit (or add) a hall-of-fame entry ---
+
+const phName = (id) => state.players[id]?.name ?? state.edit?.names?.[id] ?? 'Former player';
+
+// Everyone who can be ticked: the crew, plus anyone on this entry who has since left it.
+const phPeople = () => [...sortedPlayers().map((p) => p.id), ...Object.keys(state.edit.names).filter((id) => !state.players[id])];
+
+function openPlayEditor(id = null) {
+  if (!adminOn) return;
+  const play = id ? state.plays.find((p) => p.id === id) : null;
+  if (id && !play) return;
+  const today = state.daysList[0].key;
+  state.edit = {
+    id,
+    game: play ? { id: play.game.id ?? null, name: play.game.name, year: play.game.year || 0 } : null,
+    players: new Set(play?.players ?? []),
+    winner: play ? (play.winner ?? null) : undefined,       // undefined: not chosen yet, null: nobody won
+    names: { ...(play?.names ?? {}) },                      // the names it remembers, for people who have left
+  };
+  const gone = play?.campaign && !state.campaigns.some((c) => c.id === play.campaign);
+  openSheet(id ? 'Edit entry' : 'Add an entry', `
+    <form id="ph-form" class="adm-form" autocomplete="off">
+      <label class="field"><span>Date</span>
+        <input id="ph-date" type="date" required max="${esc(today)}" value="${esc(play?.date ?? today)}">
+      </label>
+      <fieldset class="field"><legend>Game</legend>
+        <p id="ph-picked" class="log-picked"></p>
+        <label class="sr-only" for="ph-q">Search for a game</label>
+        <input id="ph-q" type="search" placeholder="Search, or type a name" spellcheck="false">
+        <ul id="ph-results" class="results"></ul>
+      </fieldset>
+      <fieldset class="field"><legend>Who played?</legend><div id="ph-players" class="choices"></div></fieldset>
+      <fieldset class="field"><legend>Who won?</legend><div id="ph-winner" class="choices"></div></fieldset>
+      <label class="field"><span>Campaign</span>
+        <select id="ph-campaign">
+          <option value="">Not part of a campaign</option>
+          ${gone ? `<option value="${esc(play.campaign)}" selected>A campaign that has been removed</option>` : ''}
+          ${state.campaigns.map((c) => `<option value="${esc(c.id)}"${play?.campaign === c.id ? ' selected' : ''}>${esc(c.title)}</option>`).join('')}
+        </select>
+      </label>
+      <label class="field"><span>Note (optional)</span>
+        <input id="ph-note" maxlength="140" value="${esc(play?.note ?? '')}">
+      </label>
+      <p id="ph-error" class="error" role="alert" hidden></p>
+      <div class="row">
+        <button type="button" class="btn" data-action="close-dialog">Cancel</button>
+        <button type="submit" class="btn btn--solid">${id ? 'Save changes' : 'Add entry'}</button>
+      </div>
+    </form>`);
+  renderPhGame();
+  renderPhPlayers();
+  renderPhWinner();
+  if (!isLoaded()) loadGames().then(renderPhResults).catch(() => {});
+}
+
+function renderPhGame() {
+  const { game } = state.edit;
+  $('#ph-picked').innerHTML = game
+    ? `Playing: <strong>${esc(game.name)}</strong>${game.year ? ` <span class="muted">${game.year}</span>` : ''}`
+    : '<span class="muted">Search for the game, then choose it from the list.</span>';
+}
+
+function renderPhPlayers() {
+  const { players } = state.edit;
+  rerender($('#ph-players'), phPeople().map((id) => choice(
+    `data-action="ph-player" data-id="${esc(id)}"${state.players[id] ? ` style="--h:${hueOf(state.players[id].avatar)}"` : ''}`,
+    players.has(id),
+    `${state.players[id] ? avatar(state.players[id].avatar, 24) : ''}<span>${esc(phName(id))}</span>`,
+    'choice--player',
+  )).join(''));
+}
+
+function renderPhWinner() {
+  const { players, winner } = state.edit;
+  rerender($('#ph-winner'), phPeople().filter((id) => players.has(id)).map((id) => choice(
+    `data-action="ph-winner" data-id="${esc(id)}"${state.players[id] ? ` style="--h:${hueOf(state.players[id].avatar)}"` : ''}`,
+    winner === id,
+    `${state.players[id] ? avatar(state.players[id].avatar, 24) : ''}<span>${esc(phName(id))}</span>`,
+    'choice--player',
+  )).join('') + choice('data-action="ph-winner" data-id=""', winner === null, '<span>Nobody (co-op or draw)</span>'));
+}
+
+function renderPhResults() {
+  const input = $('#ph-q');
+  if (!input) return;
+  const raw = input.value.trim();
+  const row = (g, hint = '') => `<li><button type="button" class="result" data-action="ph-pick-game" data-id="${g.id ?? ''}" data-name="${esc(g.name)}" data-year="${g.year || ''}">
+    <span class="result-name">${esc(g.name)}</span><span class="result-meta">${esc(hint || g.year || '')}</span>${icon('check', 2)}</button></li>`;
+  const out = [];
+  if (raw.length >= 2) {
+    if (isLoaded()) searchGames(raw, 6).forEach((g) => out.push(row(g)));
+    else out.push('<li class="muted">Loading the game list…</li>');
+    out.push(row({ id: null, name: raw, year: 0 }, 'use as typed'));
+  }
+  $('#ph-results').innerHTML = out.join('');
+}
+
+async function submitPlayEdit(form) {
+  const E = state.edit;
+  const error = $('#ph-error');
+  const { play, error: problem } = buildPlay({
+    date: $('#ph-date').value,
+    game: E.game,
+    players: E.players,
+    winner: E.winner,
+    campaign: $('#ph-campaign').value,
+    note: $('#ph-note').value,
+  }, { today: state.daysList[0].key, nameOf: phName });
+  if (problem) {
+    error.textContent = problem;
+    error.hidden = false;
+    return;
+  }
+  const submit = form.querySelector('[type="submit"]');
+  submit.disabled = true;
+  try {
+    if (E.id) await state.store.updatePlay(E.id, play);       // a cleared note or campaign is removed
+    else await state.store.logPlay({ ...withoutUndefined(play), loggedBy: state.me ?? 'admin' });
+    $('#form-dialog').close();
+    toast(E.id ? 'Entry saved' : 'Entry added');
+  } catch (err) {
+    submit.disabled = false;
+    fail(err, "Couldn't save the entry. If this keeps happening, the site owner may need to publish the updated database rules from the README.");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2204,6 +2503,10 @@ async function copyUid() {
 
 function onAdmin(admin) {
   state.admin = admin;
+  adminOn = !!admin.isAdmin;
+  // The Admin page appears for an admin who opened it directly, and goes away if admin rights do.
+  if (!adminOn && location.hash === '#admin' && !admin.checking) location.hash = '#calendar';
+  state.view = viewFromHash();
   const dialog = $('#admin-dialog');
   if (state.adminAsked && admin.signedIn && !admin.checking) {
     state.adminAsked = false;
@@ -2285,6 +2588,7 @@ const actions = {
     renderLastWeek();
     renderCampaigns();
     renderHall();
+    renderAdmin();
     renderDayPanel();                                                                                   // the campaign boxes in a day's panel fold too
     document.querySelector(`[data-action="toggle-fold"][data-fold="${CSS.escape(id)}"]`)?.focus();   // keep keyboard focus on the button
   },
@@ -2357,6 +2661,30 @@ const actions = {
   reroll: rerollFaces,
   'close-dialog': (el) => el.closest('dialog').close(),
   'delete-player': (el) => deletePlayer(el.dataset.id),
+  'admin-remove-game': adminRemoveGame,
+  'admin-plays-toggle': () => { state.adminAllPlays = !state.adminAllPlays; renderAdmin(); },
+  'admin-backup': downloadBackup,
+  'play-add': () => openPlayEditor(null),
+  'play-edit': (el) => openPlayEditor(el.dataset.id),
+  'ph-pick-game': (el) => {
+    state.edit.game = { id: Number(el.dataset.id) || null, name: el.dataset.name, year: Number(el.dataset.year) || 0 };
+    $('#ph-q').value = '';
+    renderPhResults();
+    renderPhGame();
+  },
+  'ph-player': (el) => {
+    const { players } = state.edit;
+    if (players.has(el.dataset.id)) {
+      players.delete(el.dataset.id);
+      if (state.edit.winner === el.dataset.id) state.edit.winner = undefined;     // the winner has to have played
+    } else players.add(el.dataset.id);
+    renderPhPlayers();
+    renderPhWinner();
+  },
+  'ph-winner': (el) => {
+    state.edit.winner = el.dataset.id === '' ? null : el.dataset.id;
+    renderPhWinner();
+  },
   'confirm-yes': confirmYes,
   'admin-signin': adminSignIn,
   'admin-signout': () => state.store.signOut(),
@@ -2385,6 +2713,7 @@ document.addEventListener('input', (e) => {
   if (e.target.id === 'camp-q') renderCampResults();
   if (e.target.id === 'mg-q') renderMyResults();
   if (e.target.id === 'coll-q') renderCollection();
+  if (e.target.id === 'ph-q') renderPhResults();
 });
 
 document.addEventListener('change', (e) => {
@@ -2402,6 +2731,7 @@ document.addEventListener('submit', (e) => {
   if (e.target.id === 'details-form') submitDetails(e.target);
   if (e.target.id === 'log-form') submitLog(e.target);
   if (e.target.id === 'campaign-form') submitStartCampaign(e.target);
+  if (e.target.id === 'ph-form') submitPlayEdit(e.target);
 });
 
 $('#day-dialog').addEventListener('close', () => { state.openKey = null; });

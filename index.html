@@ -49,6 +49,7 @@
       <a id="tab-calendar" class="tab" href="#calendar"></a>
       <a id="tab-campaigns" class="tab" href="#campaigns"></a>
       <a id="tab-hall" class="tab" href="#hall"></a>
+      <a id="tab-admin" class="tab" href="#admin" hidden></a>
     </nav>
 
     <section id="reminder" class="reminder" aria-label="Game night reminder" hidden></section>
@@ -89,6 +90,16 @@
             <span id="hall-count" class="range"></span>
           </div>
           <div id="hall-body"></div>
+        </section>
+      </div>
+
+      <div id="view-admin" hidden>
+        <section class="board admin" aria-labelledby="admin-title">
+          <div class="board-head">
+            <h2 id="admin-title">Admin</h2>
+            <span id="admin-count" class="range"></span>
+          </div>
+          <div id="admin-body"></div>
         </section>
       </div>
     </main>

@@ -18,7 +18,9 @@
 //   subscribePlays(onData(plays[]), onError) -> unsubscribe
 //       play: { id, date, game: { id, name, year }, winner: id|null,
 //               players: [id], names: { [id]: name }, loggedBy, createdAt }
-//   logPlay(play) -> id        deletePlay(id)   (admin only)
+//   logPlay(play) -> id        updatePlay(id, patch)    deletePlay(id)   (the last two: admin only)
+//       (in a patch, a field set to undefined is removed)
+//   exportAll() -> { players, days, plays, campaigns }   for the admin's backup download
 //       a play may also carry  note  and  campaign (a campaign id: it is a session of that campaign)
 //
 // Campaigns (long games over several sessions, e.g. Arcs or Oath):

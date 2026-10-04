@@ -244,9 +244,25 @@ export function create() {
       return id;
     },
 
+    async updatePlay(id, patch) {
+      const play = state.plays.find((p) => p.id === id);
+      for (const [key, value] of Object.entries(patch)) {
+        if (value === undefined) delete play[key];
+        else play[key] = value;
+      }
+      persist(); emitPlays();
+    },
+
     async deletePlay(id) {
       state.plays = state.plays.filter((p) => p.id !== id);
       persist(); emitPlays();
+    },
+
+    // Everything, for the admin's backup download.
+    async exportAll() {
+      return JSON.parse(JSON.stringify({
+        players: state.players, days: state.days, plays: state.plays, campaigns: state.campaigns,
+      }));
     },
 
     // Campaigns: long games played over several sessions.
