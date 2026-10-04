@@ -1089,3 +1089,11 @@ textarea::placeholder { color: var(--ink); opacity: .5; }
 .tab .count { background: var(--alert); color: var(--on-alert); }
 .file-btn { cursor: pointer; }
 .file-btn:focus-within { outline: 3px solid var(--solid); outline-offset: 3px; }
+
+/* ---- long text must wrap or be cut, never push a frame wider than its panel ----
+   A grid's single column grows to fit its widest child unless it is capped, so one long line (a
+   note's preview, a link in a session note) used to stretch a whole campaign card past the page. */
+.campaign, .campaign-list, .fold, .sessions { grid-template-columns: minmax(0, 1fr); }
+.campaign > *, .fold > * { min-width: 0; }
+.camp-peek { min-width: 0; max-width: 100%; }
+.campaign-title, .campaign-meta, .play-note, .adm-sub, .camp-notes { overflow-wrap: anywhere; }
