@@ -6,9 +6,10 @@ rules_version = '2';
 // the calendar. These rules keep that open door narrow: only the kinds of
 // documents the app uses, in the shape it uses them.
 //
-// Deleting a player is different. It needs a signed-in admin: a Google account
-// whose user ID has a document in the `admins` collection. Only you can create
-// those documents (by hand, in the Firebase console); nobody can through the app.
+// Deleting a player, or removing an entry from the hall of fame, is different.
+// It needs a signed-in admin: a Google account whose user ID has a document in
+// the `admins` collection. Only you can create those documents (by hand, in the
+// Firebase console); nobody can through the app.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -34,17 +35,45 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // One document per calendar day, named like "2026-10-09". `votes` maps a game to
-    // the players who voted for it.
+    // One document per calendar day, named like "2026-10-09".
+    //   votes   maps a game to the players who voted for it
+    //   brings  maps a game to the players who will bring it
+    //   details is the game night's { place, time } (time as "19:30", or empty)
     match /days/{day} {
       allow read: if true;
       allow create, update: if day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-                            && request.resource.data.keys().hasOnly(['players', 'games', 'votes'])
+                            && request.resource.data.keys().hasOnly(['players', 'games', 'votes', 'brings', 'details'])
                             && request.resource.data.get('players', []).size() <= 50
                             && request.resource.data.get('games', []).size() <= 50
                             && request.resource.data.get('votes', {}) is map
-                            && request.resource.data.get('votes', {}).size() <= 50;
+                            && request.resource.data.get('votes', {}).size() <= 50
+                            && request.resource.data.get('brings', {}) is map
+                            && request.resource.data.get('brings', {}).size() <= 50
+                            && request.resource.data.get('details', {}) is map
+                            && request.resource.data.get('details', {}).get('place', '').size() <= 120
+                            && request.resource.data.get('details', {}).get('time', '').matches('^(([01][0-9]|2[0-3]):[0-5][0-9])?$');
       allow delete: if false;
+    }
+
+    // The hall of fame: one document per game played on a game night. Entries can be
+    // added by anyone, never edited, and only an admin can remove one.
+    match /plays/{playId} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(['date', 'game', 'winner', 'players', 'names', 'loggedBy', 'createdAt'])
+                    && request.resource.data.date is string
+                    && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+                    && request.resource.data.game is map
+                    && request.resource.data.game.name is string
+                    && request.resource.data.game.name.size() > 0
+                    && request.resource.data.game.name.size() <= 100
+                    && (request.resource.data.winner == null || request.resource.data.winner is string)
+                    && request.resource.data.players is list
+                    && request.resource.data.players.size() >= 1
+                    && request.resource.data.players.size() <= 30
+                    && request.resource.data.names is map
+                    && request.resource.data.names.size() <= 30;
+      allow update: if false;
+      allow delete: if isAdmin();
     }
   }
 }

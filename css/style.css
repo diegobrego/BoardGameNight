@@ -45,6 +45,33 @@
   --pill-s: 32%; --pill-l: 24%;
 }
 
+/* The hall of fame page wears gold and orange instead of purple. Everything that was purple
+   (header, buttons, selected things, the dotted background) is built from these tokens, so
+   switching page is just switching tokens (data-page is set on <html> by the app). */
+:root[data-page="hall"] {
+  --bg: #fdeccb;
+  --paper: #fffaf0;
+  --ink: #2a1500;
+  --line: #2a1500;
+  --shadow: #2a1500;
+  --solid: #f5b21b;
+  --on-solid: #2a1500;
+  --pill-s: 90%; --pill-l: 91%;
+  --dots-light: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4' fill='%23f59e0b'%3E%3Crect x='0' y='0' width='1' height='1'/%3E%3Crect x='2' y='2' width='1' height='1'/%3E%3C/svg%3E");
+  --dots-mid: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4' fill='%23f59e0b'%3E%3Crect x='0' y='0' width='1' height='1'/%3E%3Crect x='2' y='0' width='1' height='1'/%3E%3Crect x='0' y='2' width='1' height='1'/%3E%3Crect x='2' y='2' width='1' height='1'/%3E%3C/svg%3E");
+}
+
+:root[data-theme="dark"][data-page="hall"] {
+  --bg: #1c1207;
+  --paper: #2b1b0a;
+  --ink: #fff0d2;
+  --line: #f5b21b;
+  --shadow: #9a4a06;
+  --solid: #f5b21b;
+  --on-solid: #2a1500;
+  --pill-s: 38%; --pill-l: 22%;
+}
+
 *, *::before, *::after { box-sizing: border-box; }
 
 html { -webkit-text-size-adjust: 100%; }
@@ -104,6 +131,16 @@ a { color: inherit; }
   border: var(--bw) dashed var(--line); border-radius: 12px;
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
 }
+
+/* the two pages: Calendar and Hall of fame */
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.tab {
+  display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px;
+  background: var(--paper); color: var(--ink);
+  border: var(--bw) solid var(--line); border-radius: 11px; box-shadow: 3px 3px 0 var(--shadow);
+  font-weight: 700; letter-spacing: .05em; text-transform: uppercase; text-decoration: none;
+}
+.tab[aria-current="page"] { background: var(--solid); color: var(--on-solid); }
 
 /* "Game night tomorrow": orange, so it can't be mistaken for anything else on the page */
 .reminder { display: grid; gap: 10px; margin-top: 14px; }
@@ -360,6 +397,8 @@ a.btn { text-decoration: none; }
 /* longhands, so a browser that can't pass custom properties to ::backdrop still dims the page */
 .sheet::backdrop { background-color: rgb(236 230 251 / .78); background-image: var(--dots-mid); background-size: 4px 4px; }
 :root[data-theme="dark"] .sheet::backdrop { background-color: rgb(8 4 20 / .76); }
+:root[data-page="hall"] .sheet::backdrop { background-color: rgb(253 236 203 / .8); }
+:root[data-theme="dark"][data-page="hall"] .sheet::backdrop { background-color: rgb(20 11 2 / .78); }
 
 .sheet-head {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
@@ -416,9 +455,94 @@ a.btn { text-decoration: none; }
 }
 .top-pick .ico { width: 13px; height: 13px; }
 
+/* "I'll bring it" */
+.game-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.bring {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px 2px 8px;
+  background: var(--paper); color: var(--ink);
+  border: 2px solid var(--line); border-radius: 8px;
+  font-size: 14px; font-weight: 700;
+}
+.bring .ico { width: 16px; height: 16px; }
+.bring.is-on { background: var(--solid); color: var(--on-solid); }
+.bring.is-locked { opacity: .5; cursor: not-allowed; }   /* not available this day, so no bringing */
+.game-brings { font-size: 14px; }
+
+/* where and when, plus the buttons under it */
+.details { display: grid; gap: 6px; }
+.details li { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; }
+
+/* toggle buttons in the "Log game night" popup */
+.choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.choice {
+  display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px;
+  background: var(--paper); color: var(--ink); text-align: left;
+  border: var(--bw) dashed var(--line); border-radius: 11px;
+  font-weight: 700;
+}
+.choice em { font-style: normal; font-weight: 400; opacity: .6; }
+.choice--player { padding-left: 4px; background: hsl(var(--h, 260) var(--pill-s) var(--pill-l)); }
+.choice[aria-pressed="true"] { background: var(--solid); color: var(--on-solid); border-style: solid; }
+.log-picked { margin: 0; }
+.tips { list-style: disc; padding-left: 1.3em; display: grid; gap: 8px; }
+
+/* a player, as a tinted pill (the hall of fame) */
+.pill {
+  display: inline-flex; align-items: center; gap: 8px; padding: 3px 12px 3px 3px;
+  background: hsl(var(--h, 260) var(--pill-s) var(--pill-l));
+  border: var(--bw) solid var(--line); border-radius: 11px;
+  font-weight: 700;
+}
+.pill em { font-style: normal; font-weight: 400; opacity: .6; }
+.pill.is-gone { padding: 3px 12px; background: var(--paper); border-style: dashed; opacity: .75; }   /* has left the crew */
+
+/* hall of fame page */
+.hall .board-head h2 { display: flex; align-items: center; gap: 10px; }
+.hall .board-head h2 .ico { width: 30px; height: 30px; color: var(--alert); }
+.rankings { display: grid; gap: 14px; margin-top: 14px; align-items: start; }
+.ranking { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.rank-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.rank {
+  display: grid; place-items: center; flex: none; width: 34px; height: 34px;
+  background: var(--paper); border: var(--bw) solid var(--line); border-radius: 9px;
+  font-weight: 800;
+}
+.rank-row.is-first .rank { background: var(--solid); color: var(--on-solid); }
+.score { margin-left: auto; white-space: nowrap; }
+.score strong { font-size: 20px; font-weight: 800; }
+/* collapsible lists */
+.fold { display: grid; gap: 10px; align-content: start; }
+.rankings + .fold { margin-top: 18px; }
+.fold-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%;
+  padding: 6px 12px; text-align: left;
+  background: var(--paper); color: var(--ink);
+  border: var(--bw) solid var(--line); border-radius: 10px;
+}
+.fold-head .ico { transition: transform .15s; }
+.fold.is-collapsed .fold-head .ico { transform: rotate(-90deg); }
+.fold-note { margin: 0; font-size: 14px; }
+.plays { display: grid; gap: 10px; }
+.play { display: grid; gap: 6px; padding: 10px 12px; border: var(--bw) solid var(--line); border-radius: 12px; }
+.play-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.play-date { font-size: 14px; letter-spacing: .05em; text-transform: uppercase; opacity: .75; }
+.play-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.play-label { min-width: 78px; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; opacity: .7; }
+.play-faces { display: inline-flex; flex-wrap: wrap; gap: 3px; }
+.hall-empty { display: grid; justify-items: center; gap: 12px; padding: 36px 12px; text-align: center; }
+.hall-empty .ico { color: var(--alert); }
+
+@media (min-width: 760px) {
+  .rankings { grid-template-columns: 1fr 1fr; gap: 28px; }
+}
+@media (max-width: 420px) {
+  .tab { padding: 6px 11px; font-size: 15px; }
+}
+
 #dp-add-form { display: grid; gap: 10px; }
 #dp-add-form[hidden] { display: none; }
-input[type="search"], input[type="text"], input:not([type]) {
+input[type="search"], input[type="text"], input[type="time"], input:not([type]) {
   width: 100%; padding: 9px 12px;
   background: var(--paper);
   border: var(--bw) solid var(--line); border-radius: 10px;
@@ -502,6 +626,9 @@ input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; d
   .reminder .btn:hover:not(:disabled) { background: transparent; color: var(--on-alert); }
   .vote:not(.is-locked):hover { background: var(--solid); color: var(--on-solid); }
   .vote.is-on:hover { background: var(--paper); color: var(--ink); }
+  .bring:not(.is-locked):hover { background: var(--solid); color: var(--on-solid); }
+  .bring.is-on:hover { background: var(--paper); color: var(--ink); }
+  .tab:not([aria-current]):hover, .choice:not([aria-pressed="true"]):hover, .fold-head:hover { background: var(--solid); color: var(--on-solid); }
 
   /* day tiles: a dashed halo, so hover never looks like "selected" */
   .day:hover { outline: 3px dashed var(--line); outline-offset: 4px; }

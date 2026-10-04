@@ -3,6 +3,8 @@ import { createStore, isForcedDemo } from './store.js';
 import { avatar, randomSeed, hueOf } from './avatar.js';
 import { icon, iconInner } from './icons.js';
 import { upcomingDays, longLabel, rangeLabel } from './dates.js';
+import { buildIcs } from './ics.js';
+import { tally, ranked as rankList, newestFirst } from './hall.js';
 import {
   loadGames, isLoaded, findGame, searchGames, bggUrl, bggSearchUrl, parseBggLink, titleFromSlug, voteKey,
 } from './games.js';
@@ -16,6 +18,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
 ));
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const closeBtn = () => `<button type="button" class="icon-btn" data-action="close-dialog" aria-label="Close">${icon('x', 2)}</button>`;
 
 const ls = {
   get(key) { try { return localStorage.getItem(key); } catch { return null; } },
@@ -51,7 +54,11 @@ function applyTheme(theme, remember) {
   button.innerHTML = icon(dark ? 'sun' : 'moon', 2);
   button.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
   button.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
-  // Let the phone's browser bar match the header.
+  syncThemeColor();
+}
+
+// Let the phone's browser bar match the header (purple on the calendar, gold in the hall of fame).
+function syncThemeColor() {
   $('meta[name="theme-color"]').content = getComputedStyle(document.documentElement).getPropertyValue('--solid').trim();
 }
 
@@ -59,8 +66,15 @@ darkQuery?.addEventListener?.('change', () => {
   if (!ls.get(THEME_KEY)) applyTheme(preferredTheme(), false);
 });
 
+// Which hall-of-fame lists the visitor has collapsed, remembered on this device.
+const FOLD_KEY = 'bgn.hall.folded';
+function loadFolded() {
+  try { return new Set(JSON.parse(ls.get(FOLD_KEY) ?? '[]')); } catch { return new Set(); }
+}
+
 const state = {
   store: null,
+  folded: loadFolded(),      // ids of collapsed hall-of-fame lists: 'wins' | 'nights' | 'plays'
   ready: false,              // first data has arrived
   players: {},               // id -> { id, name, avatar }
   days: {},                  // YYYY-MM-DD -> { players: [id], games: [...] }
@@ -70,6 +84,12 @@ const state = {
   adminAsked: false,         // the visitor just pressed "Admin sign-in"
   onConfirm: null,           // what the confirm dialog's yes-button does
   daysList: [],              // the visible calendar days
+  view: location.hash === '#hall' ? 'hall' : 'calendar',   // which page: 'calendar' | 'hall'
+  plays: [],                 // the hall of fame: one entry per game played
+  playsReady: false,
+  playsError: false,         // the hall of fame couldn't be loaded (e.g. rules not updated yet)
+  installPrompt: null,       // the browser's "install this app" prompt, once it offers one
+  log: null,                 // state of the "Log game night" popup
   mode: 'view',              // 'view' | 'pick'
   draft: new Set(),          // day keys selected while picking
   saving: false,
@@ -103,14 +123,23 @@ const changeCount = () => state.daysList.filter((d) => state.draft.has(d.key) !=
 // A day's games, most votes first (ties keep the order they were added). Only votes from
 // players who are available that day count: a vote from someone who is no longer
 // available (or no longer exists) is ignored, and comes back if they become available again.
+// The same goes for "I'll bring it": it only counts while the bringer is available.
 function rankGames(key) {
   const games = state.days[key]?.games ?? [];
   const votes = state.days[key]?.votes ?? {};
+  const brings = state.days[key]?.brings ?? {};
   const available = new Set(savedIds(key));
+  const who = (map, g) => (map[voteKey(g)] ?? []).filter((id) => available.has(id)).sort(byName);
   const ranked = games
-    .map((g, i) => ({ g, i, voters: (votes[voteKey(g)] ?? []).filter((id) => available.has(id)).sort(byName) }))
+    .map((g, i) => ({ g, i, voters: who(votes, g), bringers: who(brings, g) }))
     .sort((a, b) => b.voters.length - a.voters.length || a.i - b.i);
   return { ranked, topVotes: ranked[0]?.voters.length ?? 0 };
+}
+
+// A game night's location and start time, e.g. "Mia's place · 19:30", or null if neither is set.
+function detailsLine(key) {
+  const { place = '', time = '' } = state.days[key]?.details ?? {};
+  return [place, time].filter(Boolean).join(' · ') || null;
 }
 
 // "Top pick so far: Azul (2 votes)", or null while nobody has voted.
@@ -137,9 +166,11 @@ function whatsappText(kind, day) {
   const ids = savedIds(day.key).sort(byName);
   const when = longLabel(day.date);
   const pick = topPickLine(day.key);
+  const where = detailsLine(day.key);
   const lines = kind === 'remind'
     ? [`⏰ Game night ${day.isToday ? 'today' : 'tomorrow'}! (${when})`, `In: ${listNames(ids, 99)}`]
     : [`🎲 Game night on ${when}?`, `Available so far: ${listNames(ids, 99)}`];
+  if (where) lines.push(`📍 ${where}`);
   if (pick) lines.push(pick);
   lines.push(kind === 'remind' ? `Details and votes: ${SITE_URL}` : `Pick your days and vote: ${SITE_URL}`);
   return lines.join('\n');
@@ -176,6 +207,9 @@ function showBanner(html) {
 
 function renderStatic() {
   $('#brand-icon').innerHTML = icon('meeple', 3);
+  $('#tab-calendar').innerHTML = `${icon('calendar', 2)}<span>Calendar</span>`;
+  $('#tab-hall').innerHTML = `${icon('trophy', 2)}<span>Hall of fame</span>`;
+  $('#hall-title').innerHTML = `${icon('trophy', 3)}<span>Hall of fame</span>`;
   applyTheme(preferredTheme(), false);   // also catches a device change that landed after the inline script ran
   const favicon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" rx="5" fill="#6d28d9"/><g color="#fff" transform="translate(2.4 2.4) scale(.8)">${iconInner('meeple')}</g></svg>`;
   $('#favicon').href = `data:image/svg+xml,${encodeURIComponent(favicon)}`;
@@ -209,6 +243,10 @@ function renderFooter() {
     else html = link('admin-signin', 'Admin sign-in');
   }
   $('#admin-slot').innerHTML = html;
+
+  // "Install as an app": hidden once it's installed (opened from the home screen).
+  const installed = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  $('#install-slot').innerHTML = installed ? '' : link('install', 'Install as an app');
 }
 
 function renderToolbar() {
@@ -224,8 +262,9 @@ function renderToolbar() {
     state.ready && !picking ? '<button type="button" class="btn btn--solid" data-action="pick">Pick my days</button>' : ''}`;
 
   const bar = $('#savebar');
-  bar.hidden = !picking;
-  document.body.classList.toggle('has-savebar', picking);
+  const showBar = picking && state.view === 'calendar';   // not on the hall of fame page
+  bar.hidden = !showBar;
+  document.body.classList.toggle('has-savebar', showBar);
   if (picking) {
     const n = changeCount();
     bar.innerHTML = `
@@ -305,19 +344,20 @@ function whatsappButton(day, extraClass = '') {
 // The orange banner: shown to everyone when today or tomorrow has enough players available.
 function renderReminder() {
   const el = $('#reminder');
-  const soon = state.ready
+  const soon = state.ready && state.view === 'calendar'
     ? state.daysList.slice(0, 2).filter((d) => savedIds(d.key).length >= MIN_PLAYERS)
     : [];
   el.hidden = !soon.length;
   el.innerHTML = soon.map((d) => {
     const ids = savedIds(d.key).sort(byName);
     const pick = topPickLine(d.key);
+    const where = detailsLine(d.key);
     return `
       <div class="reminder-item">
         <span class="reminder-icon">${icon('bell', 3)}</span>
         <p class="reminder-text">
           <strong>Game night ${d.isToday ? 'today' : 'tomorrow'}!</strong>
-          ${esc(longLabel(d.date))}. ${esc(listNames(ids))} ${ids.length === 1 ? 'is' : 'are'} available${savedMine(d.key) ? " (you're in)" : ''}.${pick ? ` ${esc(pick)}.` : ''}
+          ${esc(longLabel(d.date))}. ${esc(listNames(ids))} ${ids.length === 1 ? 'is' : 'are'} available${savedMine(d.key) ? " (you're in)" : ''}.${where ? ` Where: ${esc(where)}.` : ''}${pick ? ` ${esc(pick)}.` : ''}
         </p>
         <span class="reminder-actions">
           <button type="button" class="btn btn--small" data-action="open-day" data-date="${d.key}">See the day</button>
@@ -327,13 +367,138 @@ function renderReminder() {
   }).join('');
 }
 
+// ---------------------------------------------------------------------------
+// hall of fame
+// ---------------------------------------------------------------------------
+
+const nameFromPlays = (id) => state.plays.find((p) => p.names?.[id])?.names[id] ?? 'Former player';
+const playerName = (id) => state.players[id]?.name ?? nameFromPlays(id);
+
+// A player as a tinted pill. Someone who has since left the crew shows as plain text.
+function playerPill(id) {
+  const p = state.players[id];
+  return p
+    ? `<span class="pill" style="--h:${hueOf(p.avatar)}">${avatar(p.avatar, 24, p.name)}<span>${esc(p.name)}</span></span>`
+    : `<span class="pill is-gone"><span>${esc(playerName(id))}</span><em>(left)</em></span>`;
+}
+
+function dateLabel(key) {   // "Fri 9 Oct 2026"
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function rankingList(rows, unit) {
+  if (!rows.length) return '<p class="muted">Nothing yet.</p>';
+  return `<ol class="ranking">${rows.map((r) => `
+    <li class="rank-row${r.rank === 1 ? ' is-first' : ''}">
+      <span class="rank" aria-label="Rank ${r.rank}">${r.rank === 1 ? icon('trophy', 2) : r.rank}</span>
+      ${playerPill(r.id)}
+      <span class="score"><strong>${r.n}</strong> ${unit}${r.n === 1 ? '' : 's'}</span>
+    </li>`).join('')}</ol>`;
+}
+
+function playRow(p) {
+  const g = p.game ?? {};
+  const faces = p.players.filter((id) => state.players[id])
+    .map((id) => avatar(state.players[id].avatar, 22, state.players[id].name)).join('');
+  return `
+    <li class="play">
+      <div class="play-head">
+        <span class="play-date">${esc(dateLabel(p.date))}</span>
+        ${state.admin.isAdmin ? `<button type="button" class="icon-btn icon-btn--small" data-action="delete-play" data-id="${esc(p.id)}" aria-label="Remove this entry">${icon('x', 2)}</button>` : ''}
+      </div>
+      <a class="game-link" href="${esc(g.id ? bggUrl(g.id) : bggSearchUrl(g.name))}" target="_blank" rel="noopener noreferrer">
+        <span class="game-name">${esc(g.name)}</span>${g.year ? `<span class="game-year">${g.year}</span>` : ''}${icon('arrow', 2)}
+        <span class="sr-only">(opens BoardGameGeek)</span>
+      </a>
+      <div class="play-line"><span class="play-label">Winner</span>${p.winner ? playerPill(p.winner) : '<span class="muted">Nobody (co-op or draw)</span>'}</div>
+      <div class="play-line"><span class="play-label">Played by</span><span class="play-faces">${faces}</span><span class="muted">${plural(p.players.length, 'player')}</span></div>
+    </li>`;
+}
+
+function renderHall() {
+  const body = $('#hall-body');
+  const count = $('#hall-count');
+  count.textContent = '';
+  if (state.playsError) {
+    body.innerHTML = "<p class=\"muted\">The hall of fame can't be loaded right now. (Site owner: publish the updated Firestore rules from the README.)</p>";
+    return;
+  }
+  if (!state.playsReady) {
+    body.innerHTML = '<p class="loading">Loading…</p>';
+    return;
+  }
+  const plays = newestFirst(state.plays);
+  if (!plays.length) {
+    body.innerHTML = `
+      <div class="hall-empty">
+        ${icon('trophy', 4)}
+        <p><strong>Nothing logged yet.</strong> After a game night, open that day on the calendar and tap <em>Log game night</em>. Winners and regulars end up here.</p>
+      </div>`;
+    return;
+  }
+  const t = tally(plays);
+  const wins = rankList(t.wins, playerName);
+  const nights = rankList(t.nights, playerName);
+  count.textContent = `${plural(t.gameCount, 'game')} · ${plural(t.nightCount, 'night')}`;
+  body.innerHTML = `
+    <div class="rankings">
+      ${fold('wins', 'Most wins', { count: wins.length, preview: leaderPreview(wins, 'win'), body: rankingList(wins, 'win') })}
+      ${fold('nights', 'Most game nights', { count: nights.length, preview: leaderPreview(nights, 'night'), body: rankingList(nights, 'night') })}
+    </div>
+    ${fold('plays', 'Games played', { count: plays.length, body: `<ul class="plays">${plays.map(playRow).join('')}</ul>` })}`;
+}
+
+// A list the visitor can collapse. `preview` is what stays visible while it is collapsed.
+function fold(id, title, { count, preview = '', body }) {
+  const open = !state.folded.has(id);
+  return `
+    <section class="fold${open ? '' : ' is-collapsed'}">
+      <button type="button" class="fold-head" data-action="toggle-fold" data-fold="${id}" aria-expanded="${open}" aria-controls="fold-${id}">
+        <span class="h-small">${esc(title)} <span class="count">${count}</span></span>
+        ${icon('chevron', 2)}
+      </button>
+      ${open ? '' : preview}
+      <div id="fold-${id}" class="fold-body"${open ? '' : ' hidden'}>${body}</div>
+    </section>`;
+}
+
+// While a ranking is collapsed, just the leader: the first row, plus a note if others tie for first.
+function leaderPreview(rows, unit) {
+  const leaders = rows.filter((r) => r.rank === 1);
+  if (!leaders.length) return '';
+  return `<div class="fold-preview">${rankingList(leaders.slice(0, 1), unit)}${
+    leaders.length > 1 ? `<p class="muted fold-note">+${leaders.length - 1} more tied for first</p>` : ''}</div>`;
+}
+
+// Which page is showing. The hall of fame has its own gold look, set by data-page.
+function renderView() {
+  const hall = state.view === 'hall';
+  document.documentElement.dataset.page = hall ? 'hall' : 'calendar';
+  $('#view-calendar').hidden = hall;
+  $('#view-hall').hidden = !hall;
+  for (const [id, active] of [['#tab-calendar', !hall], ['#tab-hall', hall]]) {
+    if (active) $(id).setAttribute('aria-current', 'page');
+    else $(id).removeAttribute('aria-current');
+  }
+  syncThemeColor();
+}
+
+window.addEventListener('hashchange', () => {
+  state.view = location.hash === '#hall' ? 'hall' : 'calendar';
+  window.scrollTo(0, 0);
+  renderAll();
+});
+
 function renderAll() {
+  renderView();
   renderHeader();
   renderReminder();
   renderFooter();
   renderToolbar();
   renderCalendar();
   renderCrew();
+  renderHall();
   renderDayPanel();
 }
 
@@ -390,6 +555,7 @@ function openDay(key) {
     </div>
     <div class="sheet-body">
       <section id="dp-who" class="block"></section>
+      <section id="dp-details" class="block"></section>
       <section id="dp-games" class="block">
         <div id="dp-games-head"></div>
         <ul id="dp-list" class="games"></ul>
@@ -429,6 +595,26 @@ function renderDayPanel() {
     <button type="button" class="btn${mine ? '' : ' btn--solid'}" data-action="toggle-me">${mine ? "I can't make it" : "I'm available this day"}</button>
     ${state.admin.isAdmin && go ? whatsappButton(day) : ''}`;
 
+  // Where and when, adding it to a calendar, and (today only) logging what was played.
+  const { place = '', time = '' } = state.days[key]?.details ?? {};
+  const hasDetails = !!(place || time);
+  const showDetails = go || hasDetails;
+  const dayButtons = [
+    go ? `<button type="button" class="btn" data-action="add-to-calendar">${icon('calendar', 2)} Add to calendar</button>` : '',
+    day.isToday ? `<button type="button" class="btn btn--solid" data-action="log-game-night">${icon('trophy', 2)} Log game night</button>` : '',
+  ].join('');
+  $('#dp-details').hidden = !showDetails && !dayButtons;
+  $('#dp-details').innerHTML = `
+    ${showDetails ? `
+      <div class="head-row">
+        <h3 class="h-small">Game night</h3>
+        ${mine ? `<button type="button" class="btn btn--small" data-action="edit-details">${hasDetails ? 'Edit' : 'Add location &amp; time'}</button>` : ''}
+      </div>
+      ${hasDetails
+    ? `<ul class="details">${place ? `<li>${icon('pin', 2)}<span>${esc(place)}</span></li>` : ''}${time ? `<li>${icon('clock', 2)}<span>${esc(time)}</span></li>` : ''}</ul>`
+    : '<p class="muted">No location yet.</p>'}` : ''}
+    ${dayButtons ? `<div class="actions">${dayButtons}</div>` : ''}`;
+
   // The rules of the game ("how many players make a game night", who can vote) live behind
   // the ? button instead of taking up room here all the time.
   $('#dp-games-head').innerHTML = `
@@ -441,10 +627,11 @@ function renderDayPanel() {
   const { ranked, topVotes } = rankGames(key);
 
   $('#dp-list').innerHTML = ranked.length
-    ? ranked.map(({ g, voters }) => {
+    ? ranked.map(({ g, voters, bringers }) => {
       const by = state.players[g.by];
       const k = voteKey(g);
       const voted = !!state.me && voters.includes(state.me);
+      const bringing = !!state.me && bringers.includes(state.me);
       const top = ranked.length > 1 && topVotes > 0 && voters.length === topVotes;
       return `
         <li class="game${top ? ' is-top' : ''}">
@@ -459,6 +646,12 @@ function renderDayPanel() {
             </a>
             ${top ? `<span class="top-pick">${icon('star', 2)}<span>Top pick</span></span>` : ''}
             ${voters.length ? `<span class="game-voters"><span class="sr-only">Votes from:</span>${voters.map((id) => avatar(state.players[id].avatar, 20, state.players[id].name)).join('')}</span>` : ''}
+            <div class="game-actions">
+              <button type="button" class="bring${bringing ? ' is-on' : ''}${mine ? '' : ' is-locked'}" data-action="bring" data-gk="${esc(k)}" aria-pressed="${bringing}"${mine ? '' : ' aria-disabled="true" title="Only players who are available this day can bring a game"'}>
+                ${icon('box', 2)}<span>${bringing ? "I'm bringing it" : "I'll bring it"}</span>
+              </button>
+              ${bringers.length ? `<span class="game-brings">Brought by ${esc(listNames(bringers))}</span>` : ''}
+            </div>
             ${by ? `<span class="game-by">added by ${avatar(by.avatar, 18)} ${esc(by.name)}</span>` : ''}
           </div>
           ${g.by === state.me || state.admin.isAdmin ? `<button type="button" class="icon-btn" data-action="remove-game" data-gk="${esc(k)}" aria-label="Remove ${esc(g.name)}">${icon('x', 2)}</button>` : ''}
@@ -582,6 +775,269 @@ async function vote(el) {
   } catch (err) {
     fail(err, "Couldn't save your vote. Please try again.");
   }
+}
+
+// "I'll bring it": tap to say you'll bring this game to the game night, tap again to undo.
+// Like voting, it's for players who are available that day.
+async function bring(el) {
+  if (!state.me) return openWho('choose');
+  const key = state.openKey;
+  if (!savedMine(key)) {
+    toast('Mark yourself available this day to bring a game.');
+    return;
+  }
+  const gk = el.dataset.gk;
+  const already = (state.days[key]?.brings?.[gk] ?? []).includes(state.me);
+  try {
+    await state.store.toggleBring(key, gk, state.me, !already);
+  } catch (err) {
+    fail(err, "Couldn't save that. Please try again.");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// where and when, and "Add to calendar"
+// ---------------------------------------------------------------------------
+
+function openDetails() {
+  if (!state.me) return openWho('choose');
+  const key = state.openKey;
+  const { place = '', time = '' } = state.days[key]?.details ?? {};
+  $('#details-dialog').innerHTML = `
+    <div class="sheet-head"><h2>Game night details</h2>${closeBtn()}</div>
+    <form id="details-form" class="sheet-body" data-date="${esc(key)}" autocomplete="off">
+      <label class="field"><span>Where</span>
+        <input name="place" maxlength="80" placeholder="e.g. Mia's place, Main Street 5" value="${esc(place)}">
+      </label>
+      <label class="field"><span>Start time (optional)</span>
+        <input name="time" type="time" value="${esc(time)}">
+      </label>
+      <p class="muted">Everyone can see this. It goes into the reminder and the calendar event.</p>
+      <div class="row">
+        <button type="button" class="btn" data-action="close-dialog">Cancel</button>
+        <button type="submit" class="btn btn--solid">Save</button>
+      </div>
+    </form>`;
+  $('#details-dialog').showModal();
+  $('#details-form [name="place"]').focus();
+}
+
+async function submitDetails(form) {
+  const place = form.elements.place.value.trim().replace(/\s+/g, ' ');
+  const time = form.elements.time.value;   // '' or "19:30"
+  const submit = form.querySelector('[type="submit"]');
+  submit.disabled = true;
+  try {
+    await state.store.setDetails(form.dataset.date, { place, time });
+    $('#details-dialog').close();
+    toast('Saved');
+  } catch (err) {
+    submit.disabled = false;
+    fail(err, "Couldn't save the details. Please try again.");
+  }
+}
+
+// Downloads an .ics file; opening it adds the game night to the phone's or computer's calendar.
+function addToCalendar() {
+  const day = state.daysList.find((d) => d.key === state.openKey);
+  if (!day) return;
+  const { place = '', time = '' } = state.days[day.key]?.details ?? {};
+  const description = [
+    `Available: ${listNames(savedIds(day.key).sort(byName), 99)}`,
+    topPickLine(day.key),
+    `Details and votes: ${SITE_URL}`,
+  ].filter(Boolean).join('\n');
+  const file = buildIcs({ key: day.key, date: day.date, place, time, description, url: SITE_URL });
+  const url = URL.createObjectURL(new Blob([file], { type: 'text/calendar;charset=utf-8' }));
+  const link = Object.assign(document.createElement('a'), { href: url, download: `game-night-${day.key}.ics` });
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  toast('Calendar file downloaded');
+}
+
+// ---------------------------------------------------------------------------
+// log a game night (feeds the hall of fame)
+// ---------------------------------------------------------------------------
+
+// Re-draws a group of buttons without dropping keyboard focus from the one just pressed.
+function rerender(el, html) {
+  const active = el.contains(document.activeElement) ? document.activeElement : null;
+  const selector = active
+    ? ['action', 'id', 'i'].reduce((s, k) => (active.dataset[k] !== undefined ? `${s}[data-${k}="${CSS.escape(active.dataset[k])}"]` : s), '')
+    : null;
+  el.innerHTML = html;
+  if (selector) el.querySelector(selector)?.focus();
+}
+
+// A toggle button; a check mark shows when it's on, so it isn't colour alone.
+const choice = (attrs, on, inner, cls = '') => `<button type="button" class="choice ${cls}" aria-pressed="${on}" ${attrs}>${on ? icon('check', 2) : ''}${inner}</button>`;
+const sameGame = (a, b) => !!a && !!b && voteKey(a) === voteKey(b);
+
+function openLog(key) {
+  if (!state.me) return openWho('choose');
+  const day = state.daysList.find((d) => d.key === key);
+  const { ranked: ideas, topVotes } = rankGames(key);
+  const leaders = ideas.filter((r) => r.voters.length === topVotes);
+  const asGame = (g) => ({ id: g.id ?? null, name: g.name, year: g.year || 0 });
+  state.log = {
+    date: key,
+    ideas: ideas.map(({ g }) => asGame(g)),
+    // if one game clearly won the vote, start with it selected
+    game: topVotes > 0 && leaders.length === 1 ? asGame(leaders[0].g) : null,
+    players: new Set(savedIds(key)),   // everyone who was available; adjust below
+    winner: undefined,                 // undefined: not chosen yet, null: nobody won, otherwise a player id
+  };
+  $('#log-dialog').innerHTML = `
+    <div class="sheet-head"><h2>Log game night</h2>${closeBtn()}</div>
+    <form id="log-form" class="sheet-body" autocomplete="off">
+      <p class="muted">${esc(longLabel(day.date))}. This is saved to the hall of fame for everyone.</p>
+      <fieldset class="field"><legend>What did you play?</legend>
+        <div id="log-ideas" class="choices"></div>
+        <label class="sr-only" for="log-q">Something else</label>
+        <input id="log-q" type="search" placeholder="Something else? Search, or type a name" spellcheck="false">
+        <ul id="log-results" class="results"></ul>
+        <p id="log-picked" class="log-picked"></p>
+      </fieldset>
+      <fieldset class="field"><legend>Who played?</legend><div id="log-players" class="choices"></div></fieldset>
+      <fieldset class="field"><legend>Who won?</legend><div id="log-winner" class="choices"></div></fieldset>
+      <p id="log-error" class="error" role="alert" hidden></p>
+      <div class="row">
+        <button type="button" class="btn" data-action="close-dialog">Cancel</button>
+        <button type="submit" class="btn btn--solid">Log it</button>
+      </div>
+    </form>`;
+  renderLogGame();
+  renderLogPlayers();
+  renderLogWinner();
+  $('#log-dialog').showModal();
+}
+
+function renderLogGame() {
+  const { ideas, game } = state.log;
+  rerender($('#log-ideas'), ideas.length
+    ? ideas.map((g, i) => choice(`data-action="log-idea" data-i="${i}"`, sameGame(game, g), `<span>${esc(g.name)}</span>${g.year ? `<em>${g.year}</em>` : ''}`)).join('')
+    : '<p class="muted">Nobody suggested a game for this day, so search for what you played.</p>');
+  $('#log-picked').innerHTML = game
+    ? `Playing: <strong>${esc(game.name)}</strong>`
+    : '<span class="muted">Choose a game above, or search for another.</span>';
+}
+
+function renderLogPlayers() {
+  const { players } = state.log;
+  rerender($('#log-players'), sortedPlayers().map((p) => choice(
+    `data-action="log-player" data-id="${esc(p.id)}" style="--h:${hueOf(p.avatar)}"`,
+    players.has(p.id),
+    `${avatar(p.avatar, 24)}<span>${esc(p.name)}</span>`,
+    'choice--player',
+  )).join(''));
+}
+
+function renderLogWinner() {
+  const { players, winner } = state.log;
+  const who = sortedPlayers().filter((p) => players.has(p.id));
+  rerender($('#log-winner'), who.map((p) => choice(
+    `data-action="log-winner" data-id="${esc(p.id)}" style="--h:${hueOf(p.avatar)}"`,
+    winner === p.id,
+    `${avatar(p.avatar, 24)}<span>${esc(p.name)}</span>`,
+    'choice--player',
+  )).join('') + choice('data-action="log-winner" data-id=""', winner === null, '<span>Nobody (co-op or draw)</span>'));
+}
+
+const logResult = (g, hint = '') => `<li><button type="button" class="result" data-action="log-pick-game" data-id="${g.id ?? ''}" data-name="${esc(g.name)}" data-year="${g.year || ''}">
+  <span class="result-name">${esc(g.name)}</span><span class="result-meta">${esc(hint || g.year || '')}</span>${icon('check', 2)}
+</button></li>`;
+
+function renderLogResults() {
+  const input = $('#log-q');
+  if (!input) return;
+  const raw = input.value.trim();
+  const out = [];
+  if (raw.length >= 2) {
+    if (isLoaded()) searchGames(raw, 6).forEach((g) => out.push(logResult(g)));
+    else {
+      out.push('<li class="muted">Loading the game list…</li>');
+      loadGames().then(renderLogResults).catch(() => {});
+    }
+    out.push(logResult({ id: null, name: raw, year: 0 }, 'use as typed'));
+  }
+  $('#log-results').innerHTML = out.join('');
+}
+
+async function submitLog(form) {
+  const L = state.log;
+  const error = $('#log-error');
+  const complain = (message) => { error.textContent = message; error.hidden = false; };
+  if (!L.game) return complain('Choose the game you played.');
+  if (!L.players.size) return complain('Tick the players who took part.');
+  if (L.winner === undefined) return complain('Choose who won, or "Nobody" for a co-op game or a draw.');
+
+  const ids = sortedPlayers().filter((p) => L.players.has(p.id)).map((p) => p.id);
+  const submit = form.querySelector('[type="submit"]');
+  submit.disabled = true;
+  try {
+    await state.store.logPlay({
+      date: L.date,
+      game: { id: L.game.id ?? null, name: L.game.name, year: L.game.year || 0 },
+      winner: L.winner,
+      players: ids,
+      names: Object.fromEntries(ids.map((id) => [id, state.players[id].name])),   // so history survives renames and removals
+      loggedBy: state.me,
+    });
+    $('#log-dialog').close();
+    if ($('#day-dialog').open) $('#day-dialog').close();
+    toast('Game night logged!');
+    location.hash = '#hall';
+  } catch (err) {
+    submit.disabled = false;
+    fail(err, "Couldn't log it. If this keeps happening, the site owner may need to update the database rules.");
+  }
+}
+
+// Admin only: take a mistaken entry out of the hall of fame.
+function deletePlay(id) {
+  const play = state.plays.find((p) => p.id === id);
+  if (!play || !state.admin.isAdmin) return;
+  askConfirm({
+    title: 'Remove this entry?',
+    message: `${play.game.name} on ${dateLabel(play.date)} will be removed from the hall of fame.`,
+    label: 'Remove',
+  }, async () => {
+    await state.store.deletePlay(id);
+    toast('Entry removed');
+  });
+}
+
+// ---------------------------------------------------------------------------
+// install as an app
+// ---------------------------------------------------------------------------
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();          // keep the browser's own banner away; we offer it from the footer
+  state.installPrompt = e;
+});
+window.addEventListener('appinstalled', () => {
+  state.installPrompt = null;
+  renderFooter();
+  toast('Installed!');
+});
+
+async function installApp() {
+  const offered = state.installPrompt;
+  if (offered) {
+    state.installPrompt = null;
+    offered.prompt();
+    await offered.userChoice.catch(() => {});
+    return;
+  }
+  openInfo('Install as an app', `
+    <p>Add Board Game Night to your home screen and it opens like an app, full screen.</p>
+    <ul class="tips">
+      <li><strong>iPhone or iPad</strong> (in Safari): tap the Share button, then <em>Add to Home Screen</em>.</li>
+      <li><strong>Android</strong> (in Chrome): open the menu (the three dots), then <em>Install app</em> or <em>Add to Home screen</em>.</li>
+      <li><strong>Computer</strong> (Chrome or Edge): click the install icon at the right end of the address bar.</li>
+    </ul>`);
 }
 
 // A small "?" popup, so explanations don't have to sit on the page all the time.
@@ -872,6 +1328,46 @@ const actions = {
   }),
   'remove-game': removeGame,
   vote,
+  bring,
+  'edit-details': openDetails,
+  'add-to-calendar': addToCalendar,
+  'log-game-night': () => openLog(state.openKey),
+  'log-idea': (el) => {
+    state.log.game = { ...state.log.ideas[Number(el.dataset.i)] };
+    renderLogGame();
+  },
+  'log-pick-game': (el) => {
+    state.log.game = { id: Number(el.dataset.id) || null, name: el.dataset.name, year: Number(el.dataset.year) || 0 };
+    $('#log-q').value = '';
+    renderLogResults();
+    renderLogGame();
+  },
+  'log-player': (el) => {
+    const { players } = state.log;
+    const id = el.dataset.id;
+    if (players.has(id)) {
+      players.delete(id);
+      if (state.log.winner === id) state.log.winner = undefined;   // the winner has to be one of the players
+    } else {
+      players.add(id);
+    }
+    renderLogPlayers();
+    renderLogWinner();
+  },
+  'log-winner': (el) => {
+    state.log.winner = el.dataset.id === '' ? null : el.dataset.id;   // '' is the "nobody won" choice
+    renderLogWinner();
+  },
+  'delete-play': (el) => deletePlay(el.dataset.id),
+  'toggle-fold': (el) => {
+    const id = el.dataset.fold;
+    if (state.folded.has(id)) state.folded.delete(id);
+    else state.folded.add(id);
+    ls.set(FOLD_KEY, JSON.stringify([...state.folded]));
+    renderHall();
+    $(`[data-action="toggle-fold"][data-fold="${id}"]`)?.focus();   // keep keyboard focus on the button
+  },
+  install: installApp,
   profile: () => openWho('edit'),
   who: () => openWho('choose'),
   switch: () => openWho('choose'),
@@ -906,12 +1402,15 @@ document.addEventListener('click', (e) => {
 
 document.addEventListener('input', (e) => {
   if (e.target.id === 'game-q') renderResults();
+  if (e.target.id === 'log-q') renderLogResults();
 });
 
 document.addEventListener('submit', (e) => {
   e.preventDefault();
   if (e.target.id === 'who-form') submitWho(e.target);
   if (e.target.id === 'dp-add-form') $('#game-results [data-action="add-game"]')?.click();
+  if (e.target.id === 'details-form') submitDetails(e.target);
+  if (e.target.id === 'log-form') submitLog(e.target);
 });
 
 $('#day-dialog').addEventListener('close', () => { state.openKey = null; });
@@ -952,6 +1451,29 @@ function subscribe() {
     { from: state.daysList[0].key, to: state.daysList[state.daysList.length - 1].key },
     onError,
   );
+
+  // The hall of fame has its own listener and its own error handling, so a problem there
+  // (say, rules that haven't been updated yet) only affects that page, never the calendar.
+  state.unsubscribePlays?.();
+  state.unsubscribePlays = state.store.subscribePlays(
+    (plays) => {
+      state.plays = plays;
+      state.playsReady = true;
+      state.playsError = false;
+      renderHall();
+    },
+    (err) => {
+      console.error(err);
+      state.playsError = true;
+      renderHall();
+    },
+  );
+}
+
+// Makes the site installable, and lets the page itself open without a connection.
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator) || !location.protocol.startsWith('http')) return;
+  navigator.serviceWorker.register('sw.js').catch((err) => console.warn('Service worker not registered:', err));
 }
 
 // If the tab stays open past midnight, slide the calendar forward.
@@ -968,6 +1490,7 @@ async function boot() {
   state.daysList = upcomingDays(DAYS_AHEAD);
   renderStatic();
   renderAll();
+  registerServiceWorker();
   try {
     state.store = await createStore();
   } catch (err) {

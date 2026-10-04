@@ -2,7 +2,11 @@
 // Data layout:
 //   players/{id}        { name, avatar }
 //   days/{YYYY-MM-DD}   { players: [playerId, ...], games: [{ id, name, year, by }, ...],
-//                         votes: { [voteKey]: [playerId, ...] } }
+//                         votes:  { [voteKey]: [playerId, ...] },
+//                         brings: { [voteKey]: [playerId, ...] },
+//                         details: { place, time } }
+//   plays/{id}          one entry in the hall of fame:
+//                       { date, game: { id, name, year }, winner, players: [id], names: { id: name }, loggedBy }
 //   admins/{uid}        created by hand in the Firebase console; makes that Google
 //                       account an admin (see firestore.rules and the README)
 // Availability and games use arrayUnion/arrayRemove, so two people saving at the
@@ -13,8 +17,8 @@ import {
   getAuth, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut as fbSignOut,
 } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
 import {
-  getFirestore, collection, doc, onSnapshot, getDocs, addDoc, updateDoc, setDoc, writeBatch,
-  arrayUnion, arrayRemove, deleteField, query, where, documentId, serverTimestamp,
+  getFirestore, collection, doc, onSnapshot, getDocs, addDoc, updateDoc, setDoc, deleteDoc, writeBatch,
+  arrayUnion, arrayRemove, deleteField, query, where, orderBy, limit, documentId, serverTimestamp,
 } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
 import { voteKey } from './games.js';
 
@@ -24,6 +28,7 @@ export function create(config) {
   const auth = getAuth(app);
   const playersCol = collection(db, 'players');
   const daysCol = collection(db, 'days');
+  const playsCol = collection(db, 'plays');
 
   return {
     mode: 'firebase',
@@ -46,7 +51,9 @@ export function create(config) {
       const range = query(daysCol, where(documentId(), '>=', from), where(documentId(), '<=', to));
       const offDays = onSnapshot(range, (snap) => {
         days = {};
-        snap.forEach((d) => { days[d.id] = { players: [], games: [], votes: {}, ...d.data() }; });
+        snap.forEach((d) => {
+          days[d.id] = { players: [], games: [], votes: {}, brings: {}, details: {}, ...d.data() };
+        });
         daysSynced = !snap.metadata.fromCache;
         emit();
       }, onError);
@@ -70,10 +77,15 @@ export function create(config) {
 
     addGame: (date, game) => setDoc(doc(daysCol, date), { games: arrayUnion(game) }, { merge: true }),
 
-    // `game` must be the object exactly as it came from a snapshot. Its votes go with it.
+    // `game` must be the object exactly as it came from a snapshot. Its votes and its
+    // "I'll bring it"s go with it.
     removeGame: (date, game) => setDoc(
       doc(daysCol, date),
-      { games: arrayRemove(game), votes: { [voteKey(game)]: deleteField() } },
+      {
+        games: arrayRemove(game),
+        votes: { [voteKey(game)]: deleteField() },
+        brings: { [voteKey(game)]: deleteField() },
+      },
       { merge: true },
     ),
 
@@ -85,6 +97,40 @@ export function create(config) {
       { votes: { [key]: on ? arrayUnion(playerId) : arrayRemove(playerId) } },
       { merge: true },
     ),
+
+    // Same shape as votes: who will bring each game to the game night.
+    toggleBring: (date, key, playerId, on) => setDoc(
+      doc(daysCol, date),
+      { brings: { [key]: on ? arrayUnion(playerId) : arrayRemove(playerId) } },
+      { merge: true },
+    ),
+
+    // The game night's location and start time ("19:30", or '' for none).
+    setDetails: (date, { place, time }) => setDoc(
+      doc(daysCol, date),
+      { details: { place: place ?? '', time: time ?? '' } },
+      { merge: true },
+    ),
+
+    // The hall of fame. Listening is separate from the calendar's data, so a problem
+    // here (for example rules that haven't been updated yet) never breaks the calendar.
+    subscribePlays(onData, onError) {
+      const q = query(playsCol, orderBy('date', 'desc'), limit(500));
+      return onSnapshot(q, (snap) => {
+        onData(snap.docs.map((d) => {
+          const v = d.data();
+          return { id: d.id, ...v, createdAt: v.createdAt?.toMillis?.() ?? 0 };
+        }));
+      }, onError);
+    },
+
+    async logPlay(play) {
+      const ref = await addDoc(playsCol, { ...play, createdAt: serverTimestamp() });
+      return ref.id;
+    },
+
+    // Admin only (the rules enforce it).
+    deletePlay: (id) => deleteDoc(doc(playsCol, id)),
 
     // Admin only (the rules enforce it). Finds every day the player ever picked, not
     // just the visible two weeks. A batch holds at most 500 writes, so a very long

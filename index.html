@@ -8,8 +8,8 @@
   <meta property="og:title" content="Board Game Night">
   <meta property="og:description" content="Pick the days you're available, see when enough of us can play, and suggest games.">
   <meta name="theme-color" content="#6d28d9">
-  <!-- Pick the theme before the page paints, so there's no flash of the wrong one:
-       the saved choice if there is one, otherwise the device's setting. -->
+  <!-- Pick the theme (and which page's colours) before the page paints, so there's no flash
+       of the wrong ones: the saved theme if there is one, otherwise the device's setting. -->
   <script>
     (function () {
       var theme = null;
@@ -17,10 +17,18 @@
       if (theme !== 'light' && theme !== 'dark') {
         theme = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
       }
-      document.documentElement.setAttribute('data-theme', theme);
+      var root = document.documentElement;
+      root.setAttribute('data-theme', theme);
+      root.setAttribute('data-page', location.hash === '#hall' ? 'hall' : 'calendar');
     })();
   </script>
   <link rel="icon" id="favicon" href="data:,">
+  <!-- Installable as an app (add to home screen) -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Game Night">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;500;700;800&display=swap" rel="stylesheet">
@@ -36,32 +44,52 @@
       </div>
     </header>
 
+    <nav class="tabs" aria-label="Pages">
+      <a id="tab-calendar" class="tab" href="#calendar"></a>
+      <a id="tab-hall" class="tab" href="#hall"></a>
+    </nav>
+
     <section id="reminder" class="reminder" aria-label="Game night reminder" hidden></section>
 
     <div id="banner" class="banner" role="status" hidden></div>
 
     <main>
-      <section class="board" aria-labelledby="board-title">
-        <div class="board-head">
-          <h2 id="board-title">Next 2 weeks</h2>
-          <span id="range" class="range"></span>
-        </div>
-        <div id="toolbar" class="toolbar"></div>
-        <div id="calendar" class="calendar"></div>
-        <ul id="legend" class="legend"></ul>
-      </section>
+      <div id="view-calendar">
+        <section class="board" aria-labelledby="board-title">
+          <div class="board-head">
+            <h2 id="board-title">Next 2 weeks</h2>
+            <span id="range" class="range"></span>
+          </div>
+          <div id="toolbar" class="toolbar"></div>
+          <div id="calendar" class="calendar"></div>
+          <ul id="legend" class="legend"></ul>
+        </section>
 
-      <section id="crew" class="crew" hidden></section>
+        <section id="crew" class="crew" hidden></section>
+      </div>
+
+      <div id="view-hall" hidden>
+        <section class="board hall" aria-labelledby="hall-title">
+          <div class="board-head">
+            <h2 id="hall-title">Hall of fame</h2>
+            <span id="hall-count" class="range"></span>
+          </div>
+          <div id="hall-body"></div>
+        </section>
+      </div>
     </main>
 
     <footer class="foot">
       <p>Game links go to <a href="https://boardgamegeek.com" target="_blank" rel="noopener noreferrer">BoardGameGeek</a>. Not affiliated with BGG.</p>
+      <p id="install-slot" class="foot-admin"></p>
       <p id="admin-slot" class="foot-admin"></p>
     </footer>
   </div>
 
   <div id="savebar" class="savebar" hidden></div>
   <dialog id="day-dialog" class="sheet" aria-labelledby="dp-title"></dialog>
+  <dialog id="details-dialog" class="sheet"></dialog>
+  <dialog id="log-dialog" class="sheet"></dialog>
   <dialog id="who-dialog" class="sheet"></dialog>
   <dialog id="confirm-dialog" class="sheet"></dialog>
   <dialog id="info-dialog" class="sheet"></dialog>

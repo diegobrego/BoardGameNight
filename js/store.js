@@ -10,6 +10,14 @@
 //   setAvailability(playerId, addDates, removeDates)
 //   addGame(date, game) / removeGame(date, game)   (removing a game also drops its votes)
 //   toggleVote(date, voteKey, playerId, on)         days[date].votes: { [voteKey]: [playerId] }
+//   toggleBring(date, voteKey, playerId, on)        days[date].brings: { [voteKey]: [playerId] }
+//   setDetails(date, { place, time })               days[date].details
+//
+// Hall of fame (one entry per game played):
+//   subscribePlays(onData(plays[]), onError) -> unsubscribe
+//       play: { id, date, game: { id, name, year }, winner: id|null,
+//               players: [id], names: { [id]: name }, loggedBy, createdAt }
+//   logPlay(play) -> id        deletePlay(id)   (admin only)
 //
 // Admin tools:
 //   deletePlayer(id)                     removes the player and takes them off every day
