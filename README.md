@@ -2,7 +2,7 @@
 
 A tiny website for a board game group. Everyone picks the days they're free over the next two weeks, days with 3+ free players light up green, and on those days the group can pile up game options with links to BoardGameGeek.
 
-Plain HTML/CSS/JS, no build step, hosted for free on GitHub Pages. Look: black and white with a Playdate feel (dither patterns, hard shadows, pixel-art player faces), a rounded easy-to-read font and crisp vector icons, with green as the one signal colour.
+Plain HTML/CSS/JS, no build step, hosted for free on GitHub Pages. Look: a Playdate feel (dither patterns, hard shadows, pixel-art player faces) in purple, with a rounded easy-to-read font and crisp vector icons. There's a **light and a dark theme**: it follows the device by default, and the sun/moon button in the header switches it (and remembers the choice). Green is reserved for "game on" days.
 
 ## Try it on your computer
 
@@ -74,7 +74,7 @@ In admin mode you get an **Admin** tag and an **X** next to everyone in "The cre
 | What | Where |
 | --- | --- |
 | Players needed for a "game on" day, number of days shown | [`js/config.js`](js/config.js) (`MIN_PLAYERS`, `DAYS_AHEAD`) |
-| The green (set `--go` to `#000` for pure black and white) | top of [`css/style.css`](css/style.css) |
+| The colours: one palette per theme (`--solid` is the purple, `--go` the green) | the two token blocks at the top of [`css/style.css`](css/style.css) (`:root` is light, `:root[data-theme="dark"]` is dark) |
 | The font (currently [M PLUS Rounded 1c](https://fonts.google.com/specimen/M+PLUS+Rounded+1c)) | `--font` in [`css/style.css`](css/style.css) and the Google Fonts `<link>` in [`index.html`](index.html) |
 
 ## Files

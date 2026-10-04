@@ -28,6 +28,38 @@ const ls = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// theme: light / dark. index.html sets the first value before the page paints.
+// Until the visitor picks one themselves, we keep following their device.
+// ---------------------------------------------------------------------------
+
+const THEME_KEY = 'bgn.theme';
+const darkQuery = window.matchMedia?.('(prefers-color-scheme: dark)');
+const currentTheme = () => (document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
+
+// The visitor's saved choice, otherwise whatever their device is set to right now.
+function preferredTheme() {
+  const saved = ls.get(THEME_KEY);
+  if (saved === 'light' || saved === 'dark') return saved;
+  return darkQuery?.matches ? 'dark' : 'light';
+}
+
+function applyTheme(theme, remember) {
+  document.documentElement.dataset.theme = theme;
+  if (remember) ls.set(THEME_KEY, theme);
+  const dark = theme === 'dark';
+  const button = $('#theme-btn');
+  button.innerHTML = icon(dark ? 'sun' : 'moon', 2);
+  button.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
+  button.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
+  // Let the phone's browser bar match the header.
+  $('meta[name="theme-color"]').content = getComputedStyle(document.documentElement).getPropertyValue('--solid').trim();
+}
+
+darkQuery?.addEventListener?.('change', () => {
+  if (!ls.get(THEME_KEY)) applyTheme(preferredTheme(), false);
+});
+
 const state = {
   store: null,
   ready: false,              // first data has arrived
@@ -99,7 +131,8 @@ function showBanner(html) {
 
 function renderStatic() {
   $('#brand-icon').innerHTML = icon('meeple', 3);
-  const favicon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" rx="5" fill="#000"/><g color="#fff" transform="translate(2.4 2.4) scale(.8)">${iconInner('meeple')}</g></svg>`;
+  applyTheme(preferredTheme(), false);   // also catches a device change that landed after the inline script ran
+  const favicon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" rx="5" fill="#6d28d9"/><g color="#fff" transform="translate(2.4 2.4) scale(.8)">${iconInner('meeple')}</g></svg>`;
   $('#favicon').href = `data:image/svg+xml,${encodeURIComponent(favicon)}`;
   $('#legend').innerHTML = `
     <li><span class="swatch swatch--mine"></span>You're free</li>
@@ -651,6 +684,7 @@ function onAdmin(admin) {
 // ---------------------------------------------------------------------------
 
 const actions = {
+  theme: () => applyTheme(currentTheme() === 'dark' ? 'light' : 'dark', true),
   pick: startPick,
   'cancel-pick': () => { state.mode = 'view'; renderAll(); },
   'save-pick': savePick,

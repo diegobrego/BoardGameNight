@@ -7,7 +7,19 @@
   <meta name="description" content="Pick the days you're free, see when enough of us can play, and suggest games.">
   <meta property="og:title" content="Board Game Night">
   <meta property="og:description" content="Pick the days you're free, see when enough of us can play, and suggest games.">
-  <meta name="theme-color" content="#000000">
+  <meta name="theme-color" content="#6d28d9">
+  <!-- Pick the theme before the page paints, so there's no flash of the wrong one:
+       the saved choice if there is one, otherwise the device's setting. -->
+  <script>
+    (function () {
+      var theme = null;
+      try { theme = localStorage.getItem('bgn.theme'); } catch (e) { /* private mode */ }
+      if (theme !== 'light' && theme !== 'dark') {
+        theme = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+  </script>
   <link rel="icon" id="favicon" href="data:,">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -18,7 +30,10 @@
   <div class="app">
     <header class="top">
       <h1 class="brand"><span class="brand-icon" id="brand-icon"></span><span>Board Game Night</span></h1>
-      <div id="me-slot"></div>
+      <div class="top-right">
+        <button type="button" id="theme-btn" class="theme-btn" data-action="theme"></button>
+        <div id="me-slot"></div>
+      </div>
     </header>
 
     <div id="banner" class="banner" role="status" hidden></div>
