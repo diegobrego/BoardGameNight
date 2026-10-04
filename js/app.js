@@ -872,7 +872,7 @@ function renderDayPanel() {
       : "I'll bring it";
     const bringTip = canAct ? (bringing ? 'Tap to stop bringing it' : bringers.length ? 'Tap to bring it too' : 'Tap to say you will bring it') : lockedTitle;
     return `
-        <li class="game${top ? ' is-top' : ''}">
+        <li class="game${top ? ' is-top' : ''}" data-gk="${esc(k)}">
           <span class="game-badge">${top ? `${icon('star', 2)}<span class="sr-only">Top pick</span>` : ''}</span>
           <div class="game-head">
             <div class="game-left">
@@ -902,6 +902,7 @@ function renderDayPanel() {
   // a long one closed. Closed, the most-voted game stays on show, with a note about the rest.
   // The rules of the game ("how many players make a game night", who can vote) live behind the ?
   // button instead of taking up room here all the time.
+  const before = rowTops($('#dp-list'));     // where each game is now, so a game that moves can slide
   const foldable = games.length > 0;
   const startOpen = games.length <= 3;
   const open = isOpen('dp-games', startOpen);
@@ -922,8 +923,37 @@ function renderDayPanel() {
   $('#dp-list').innerHTML = ranked.length
     ? ranked.map(row).join('')
     : canSuggest && !past ? '<li class="muted">No games yet. Add the first one!</li>' : '';
+  slideRows($('#dp-list'), before);
 
   $('#dp-add').hidden = !canSuggest || past;
+}
+
+// Moving a game up or down the list (votes changed, one was added or removed) slides it to its new place
+// instead of jumping there. A game's place is measured from the top of the list, so other changes in the
+// panel don't count as movement, and nothing slides while the list is closed or when it has just opened.
+const prefersLessMotion = () => !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+function rowTops(list) {
+  const tops = new Map();
+  if (!list.getClientRects().length) return tops;          // closed or not shown: nothing to slide from
+  const base = list.getBoundingClientRect().top;
+  for (const li of list.querySelectorAll(':scope > .game[data-gk]')) tops.set(li.dataset.gk, li.getBoundingClientRect().top - base);
+  return tops;
+}
+
+function slideRows(list, before) {
+  if (!before.size || prefersLessMotion() || !list.getClientRects().length) return;
+  const base = list.getBoundingClientRect().top;
+  for (const li of list.querySelectorAll(':scope > .game[data-gk]')) {
+    const was = before.get(li.dataset.gk);
+    if (was === undefined) {   // a game that wasn't there a moment ago fades in
+      li.animate([{ opacity: 0, transform: 'translateY(-6px)' }, { opacity: 1, transform: 'none' }], { duration: 220, easing: 'ease-out' });
+      continue;
+    }
+    const dy = was - (li.getBoundingClientRect().top - base);
+    if (Math.abs(dy) < 1) continue;
+    li.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 320, easing: 'cubic-bezier(.2, .8, .2, 1)' });
+  }
 }
 
 async function toggleMe() {
