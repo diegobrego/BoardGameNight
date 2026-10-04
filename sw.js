@@ -3,8 +3,13 @@
 //
 // It always asks the network first and only falls back to the saved copy when that fails,
 // so a new version of the site shows up straight away and is never held back by an old cache.
+//
+// "Asks the network" has to mean asking the server, not the browser's own HTTP cache: GitHub
+// Pages marks every file "max-age=600", so a plain fetch() could hand back a copy up to ten
+// minutes old after a new version went out. `cache: 'no-cache'` revalidates every time (a tiny
+// "has it changed?" request that usually answers 304), so a reload always gets the latest.
 
-const CACHE = 'bgn-shell-v1';
+const CACHE = 'bgn-shell-v2';
 
 const SHELL = [
   './',
@@ -46,7 +51,7 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;
 
   event.respondWith(
-    fetch(request)
+    fetch(request, { cache: 'no-cache' })
       .then((response) => {
         if (response.ok) {
           const copy = response.clone();

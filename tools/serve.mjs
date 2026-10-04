@@ -3,6 +3,7 @@
 //   PORT=3000 node tools/serve.mjs
 // (The site uses ES modules, so opening index.html straight from disk won't work.)
 
+import { createHash } from 'node:crypto';
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
@@ -31,6 +32,8 @@ http.createServer(async (req, res) => {
     res.writeHead(200, {
       'Content-Type': types[extname(file)] ?? 'application/octet-stream',
       'Cache-Control': 'no-store',
+      // like GitHub Pages, so the "new version is ready" check can be tried locally
+      ETag: `"${createHash('md5').update(body).digest('hex')}"`,
     });
     res.end(body);
   } catch {

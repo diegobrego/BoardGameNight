@@ -311,12 +311,13 @@ function dayTile(d) {
   const mine = !!state.me && ids.includes(state.me);
   const changed = picking && state.draft.has(d.key) !== savedMine(d.key);
   const campaigns = plannedOn(state.campaigns, d.key);
+  const myCampaign = !!state.me && campaigns.some((c) => c.players.includes(state.me));   // a session of a campaign I'm in
   const logged = d.isPast && loggedDates().has(d.key);
   const cls = [
     'day', mine && 'is-mine', go && 'is-go', d.isWeekend && 'is-weekend', d.isPast && 'is-past',
     d.isToday && 'is-today', changed && 'is-changed', !ids.length && 'is-empty',
   ].filter(Boolean).join(' ');
-  const label = `${longLabel(d.date)}: ${plural(ids.length, 'player')} available${go ? (d.isPast ? ', was a game night' : ', game on') : ''}${mine ? ', including you' : ''}${campaigns.length ? `, campaign session: ${campaigns.map((c) => c.title).join(', ')}` : ''}${d.isPast && go ? (logged ? ', logged' : ', not logged yet') : ''}`;
+  const label = `${longLabel(d.date)}: ${plural(ids.length, 'player')} available${go ? (d.isPast ? ', was a game night' : ', game on') : ''}${mine ? ', including you' : ''}${campaigns.length ? `, campaign session: ${campaigns.map((c) => c.title).join(', ')}${myCampaign ? " (you're in it)" : ''}` : ''}${d.isPast && go ? (logged ? ', logged' : ', not logged yet') : ''}`;
   const faces = ids.map((id) => avatar(state.players[id].avatar, 22, state.players[id].name)).join('');
   const sub = d.isToday ? 'Today' : d.num === 1 ? d.month : '';
   return `
@@ -331,7 +332,7 @@ function dayTile(d) {
         <span class="day-count">${ids.length} available</span>
         ${go && !d.isPast ? `<span class="day-flag">${icon('star', 2)}<span>Game on</span></span>` : ''}
         ${d.isPast && go ? `<span class="day-log ${logged ? 'is-done' : 'is-todo'}">${icon(logged ? 'check' : 'trophy', 2)}<span>${logged ? 'Logged' : 'Not logged'}</span></span>` : ''}
-        ${campaigns.length ? `<span class="day-campaign">${icon('flag', 2)}<span>Campaign</span></span>` : ''}
+        ${campaigns.length ? `<span class="day-campaign${myCampaign ? ' is-mine' : ''}">${icon('flag', 2)}<span>${myCampaign ? 'Your campaign' : 'Campaign'}</span></span>` : ''}
         ${picking ? `<span class="day-check">${mine ? icon('check', 2) : ''}</span>` : ''}
       </span>
     </button>`;
@@ -444,9 +445,13 @@ function campaignBanner(d, c) {
     </div>`;
 }
 
-// Takes you to the campaign on the Campaigns page, with the running list opened.
+// Takes you to the campaign on the Campaigns page, with the list it is in (running or
+// finished) opened. Used from the banners, the day panel and after reopening a campaign.
 function showCampaign(id) {
-  state.folds['running-campaigns'] = true;
+  const c = state.campaigns.find((x) => x.id === id);
+  if (!c) return toast("That campaign isn't there any more.");
+  if ($('#day-dialog').open) $('#day-dialog').close();
+  state.folds[c.status === 'finished' ? 'finished-campaigns' : 'running-campaigns'] = true;
   ls.set(FOLDS_KEY, JSON.stringify(state.folds));
   if (location.hash === '#campaigns') renderAll();
   else location.hash = '#campaigns';
@@ -707,15 +712,34 @@ function renderDayPanel() {
   // A campaign session planned for this day (see the Campaigns tab).
   const planned = plannedOn(state.campaigns, key);
   $('#dp-campaign').hidden = !planned.length;
-  $('#dp-campaign').innerHTML = planned.map((c) => `
-    <div class="campaign-plan">
-      <span class="campaign-plan-icon">${icon('flag', 2)}</span>
-      <div class="campaign-plan-text">
+  $('#dp-campaign').innerHTML = planned.map((c) => {
+    // the campaign's players; the ones who haven't said they're available that day are faded
+    const crew = c.players.filter((id) => state.players[id]);
+    const here = new Set(ids);
+    const faces = crew.map((id) => {
+      const away = !here.has(id);
+      return `<span class="plan-face${away ? ' is-away' : ''}">${avatar(state.players[id].avatar, 24, `${state.players[id].name}${away ? " (hasn't said they're available)" : ''}`)}</span>`;
+    }).join('');
+    // One line while collapsed (the default), so it doesn't take over the panel; the details open on tap.
+    const foldId = `dpc-${c.id}`;
+    const open = isOpen(foldId, false);
+    return `
+    <div class="campaign-plan${open ? '' : ' is-collapsed'}">
+      <button type="button" class="campaign-plan-head" data-action="toggle-fold" data-fold="${esc(foldId)}" data-default="0" aria-expanded="${open}" aria-controls="${esc(foldId)}">
+        <span class="campaign-plan-icon">${icon('flag', 2)}</span>
         <strong>Campaign session: ${esc(c.title)}</strong>
+        ${icon('chevron', 2)}
+      </button>
+      <div id="${esc(foldId)}" class="campaign-plan-body"${open ? '' : ' hidden'}>
         <span class="muted">${esc(c.game.name)} · session ${sessionsOf(state.plays, c.id).length + 1}</span>
+        <span class="plan-faces">${faces}<span class="muted">${crew.filter((id) => here.has(id)).length} of ${crew.length} available</span></span>
+        <div class="campaign-plan-actions">
+          ${(day.isToday || past) && myRights(c).log ? `<button type="button" class="btn btn--small" data-action="log-session" data-campaign="${esc(c.id)}" data-date="${esc(key)}">Log session</button>` : ''}
+          <button type="button" class="btn btn--small" data-action="open-campaign" data-id="${esc(c.id)}">See campaign ${icon('arrow', 2)}</button>
+        </div>
       </div>
-      ${(day.isToday || past) && myRights(c).log ? `<button type="button" class="btn btn--small" data-action="log-session" data-campaign="${esc(c.id)}" data-date="${esc(key)}">Log session</button>` : ''}
-    </div>`).join('');
+    </div>`;
+  }).join('');
 
   // Where and when, adding it to a calendar, and logging what was played (today and last week).
   const { place = '', time = '' } = state.days[key]?.details ?? {};
@@ -740,7 +764,11 @@ function renderDayPanel() {
     ${loggedHere.length ? `
       <div>
         <h3 class="h-small">Logged</h3>
-        <ul class="logged">${loggedHere.map((p) => `<li>${icon('check', 2)}<span>${esc(p.game.name)}${p.winner ? ` · ${esc(playerName(p.winner))} won` : ''}</span></li>`).join('')}</ul>
+        <ul class="logged">${loggedHere.map((p) => {
+    const camp = p.campaign ? state.campaigns.find((c) => c.id === p.campaign) : null;
+    return `<li>${icon('check', 2)}<span>${esc(p.game.name)}${p.winner ? ` · ${esc(playerName(p.winner))} won` : ''}${camp
+      ? ` · <button type="button" class="link-btn" data-action="open-campaign" data-id="${esc(camp.id)}">${esc(camp.title)}${icon('arrow', 2)}</button>` : ''}</span></li>`;
+  }).join('')}</ul>
       </div>` : ''}
     ${dayButtons ? `<div class="actions">${dayButtons}</div>` : ''}`;
 
@@ -2044,6 +2072,7 @@ const actions = {
     renderLastWeek();
     renderCampaigns();
     renderHall();
+    renderDayPanel();                                                                                   // the campaign boxes in a day's panel fold too
     document.querySelector(`[data-action="toggle-fold"][data-fold="${CSS.escape(id)}"]`)?.focus();   // keep keyboard focus on the button
   },
   'player-card': (el) => openPlayerCard(el.dataset.id),
@@ -2104,6 +2133,7 @@ const actions = {
   'campaign-add-confirm': confirmAddPlayers,
   'campaign-delete': (el) => deleteCampaign(el.dataset.id),
   install: installApp,
+  'reload-page': () => location.reload(),
   profile: () => openWho('edit'),
   who: () => openWho('choose'),
   switch: () => openWho('choose'),
@@ -2244,6 +2274,34 @@ function registerServiceWorker() {
   navigator.serviceWorker.register('sw.js').catch((err) => console.warn('Service worker not registered:', err));
 }
 
+// A page that stays open (the installed app often does) never notices a new version of the site
+// by itself. Whenever it comes back to the front, and every half hour, ask the server whether
+// app.js has changed since this page started, and offer a reload if it has.
+let appVersion = null;
+let versionCheckedAt = 0;
+
+async function checkForNewVersion() {
+  if (!location.protocol.startsWith('http')) return;
+  versionCheckedAt = Date.now();
+  let tag = null;
+  try {
+    const res = await fetch('js/app.js', { method: 'HEAD', cache: 'no-cache' });
+    if (res.ok) tag = res.headers.get('etag') || res.headers.get('last-modified');
+  } catch { /* offline: nothing to check */ }
+  if (!tag) return;
+  if (appVersion === null) appVersion = tag;     // the first answer is "the version this page started with"
+  else if (tag !== appVersion) {
+    $('#update').innerHTML = `<strong>A new version of the site is ready.</strong>
+      <button type="button" class="btn btn--small" data-action="reload-page">Reload</button>`;
+    $('#update').hidden = false;
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && Date.now() - versionCheckedAt > 2 * 60 * 1000) checkForNewVersion();
+});
+setInterval(() => { if (!document.hidden) checkForNewVersion(); }, 30 * 60 * 1000);
+
 // If the tab stays open past midnight, slide the calendar forward.
 document.addEventListener('visibilitychange', () => {
   if (document.hidden || !state.store) return;
@@ -2259,6 +2317,7 @@ async function boot() {
   renderStatic();
   renderAll();
   registerServiceWorker();
+  checkForNewVersion();
   try {
     state.store = await createStore();
   } catch (err) {

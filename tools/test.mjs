@@ -115,8 +115,9 @@ const root = new URL('..', import.meta.url);
       clients: { claim: async () => { sandbox.claimed = true; } },
     },
     caches,
-    fetch: async (req) => {
+    fetch: async (req, init) => {
       if (!online) throw new TypeError('offline');
+      sandbox.lastInit = init;
       return { ok: true, url: req.url, body: 'fresh', clone() { return { ...this }; } };
     },
     URL,
@@ -140,21 +141,22 @@ const root = new URL('..', import.meta.url);
 
   // install: caches the shell and takes over straight away
   await run('install', {});
-  assert.equal(stores.get('bgn-shell-v1').size, shell.length, 'the whole shell is cached on install');
+  assert.equal(stores.get('bgn-shell-v2').size, shell.length, 'the whole shell is cached on install');
   assert.ok(sandbox.skipped, 'a new version takes over without waiting');
 
   // activate: old caches are cleaned up
-  stores.set('bgn-shell-v0', new Map());
+  stores.set('bgn-shell-v1', new Map());
   await run('activate', {});
-  assert.deepEqual([...stores.keys()], ['bgn-shell-v1'], 'old caches are deleted');
+  assert.deepEqual([...stores.keys()], ['bgn-shell-v2'], 'old caches are deleted');
   assert.ok(sandbox.claimed, 'open pages are taken over');
 
   // fetch, online: the fresh network copy wins, and is saved for later
   const page = { url: 'https://site.test/BoardGameNight/css/style.css', method: 'GET' };
   const online1 = await run('fetch', { request: page, responded: false });
   assert.equal(online1.body, 'fresh', 'network first: new versions show up straight away');
+  assert.equal(sandbox.lastInit?.cache, 'no-cache', "it asks the server, not the browser's 10-minute HTTP cache");
   await new Promise((r) => setTimeout(r, 0));
-  assert.equal(stores.get('bgn-shell-v1').get(absolute(page.url)).body, 'fresh', 'the fresh copy is saved (replacing the install-time one)');
+  assert.equal(stores.get('bgn-shell-v2').get(absolute(page.url)).body, 'fresh', 'the fresh copy is saved (replacing the install-time one)');
 
   // fetch, offline: falls back to the saved copy, ignoring ?demo-style query strings
   online = false;
