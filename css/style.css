@@ -1006,9 +1006,10 @@ input[type="date"] {
 .adm-player-detail .facts { margin: 0; }
 .adm-player-detail p { margin: 0; }
 @media (hover: hover) { .adm-player:not(.is-selected) .adm-player-head:hover { background: var(--solid); color: var(--on-solid); } }
-.btn--danger { background: #fee2e2; color: #7f1d1d; border-color: #7f1d1d; box-shadow: 3px 3px 0 #7f1d1d; }
-:root[data-theme="dark"] .btn--danger { background: #3b1219; color: #fecaca; border-color: #f87171; box-shadow: 3px 3px 0 #7f1d1d; }
-@media (hover: hover) { .btn--danger:hover:not(:disabled) { background: #7f1d1d; color: #fff; } }
+/* delete: a clear red (pale pink fill, strong red text and edge) */
+.btn--danger { background: #fee2e2; color: #b91c1c; border-color: #b91c1c; box-shadow: 3px 3px 0 #b91c1c; }
+:root[data-theme="dark"] .btn--danger { background: #3b1219; color: #fca5a5; border-color: #f87171; box-shadow: 3px 3px 0 #b91c1c; }
+@media (hover: hover) { .btn--danger:hover:not(:disabled) { background: #b91c1c; color: #fff; } }
 
 /* ---------------------------------------------------------------- players page */
 
@@ -1097,3 +1098,8 @@ textarea::placeholder { color: var(--ink); opacity: .5; }
 .campaign > *, .fold > * { min-width: 0; }
 .camp-peek { min-width: 0; max-width: 100%; }
 .campaign-title, .campaign-meta, .play-note, .adm-sub, .camp-notes { overflow-wrap: anywhere; }
+
+/* the round-cornered X that deletes something, in the same red as the "Remove" buttons (btn--danger) */
+.icon-btn--danger { background: #fee2e2; color: #b91c1c; border-color: #b91c1c; }
+:root[data-theme="dark"] .icon-btn--danger { background: #3b1219; color: #fca5a5; border-color: #f87171; }
+@media (hover: hover) { .icon-btn--danger:hover { background: #b91c1c; color: #ffffff; } }

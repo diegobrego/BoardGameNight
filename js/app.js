@@ -894,7 +894,7 @@ function renderDayPanel() {
               ${icon('box', 2)}<span>${esc(bringLabel)}</span>
             </button>
           </div>
-          ${(g.by === state.me && !past) || state.admin.isAdmin ? `<button type="button" class="icon-btn" data-action="remove-game" data-gk="${esc(k)}" aria-label="Remove ${esc(g.name)}">${icon('x', 2)}</button>` : ''}
+          ${(g.by === state.me && !past) || state.admin.isAdmin ? `<button type="button" class="icon-btn icon-btn--danger" data-action="remove-game" data-gk="${esc(k)}" aria-label="Remove ${esc(g.name)}">${icon('x', 2)}</button>` : ''}
         </li>`;
   };
 
@@ -1649,7 +1649,7 @@ function campaignCard(c) {
       ${peopleButtons ? `<div class="actions">${peopleButtons}</div>` : ''}
       ${notesFold}
       ${list.length ? fold(`sessions-${c.id}`, 'Sessions', { count: list.length, open: false, body: `<ul class="sessions">${list.join('')}</ul>` }) : ''}
-      ${rights.remove ? `<button type="button" class="btn btn--small" data-action="campaign-delete" data-id="${esc(c.id)}">Remove campaign</button>` : ''}
+      ${rights.remove ? `<button type="button" class="btn btn--small btn--danger" data-action="campaign-delete" data-id="${esc(c.id)}">Remove campaign</button>` : ''}
     </li>`;
 }
 
@@ -2113,7 +2113,7 @@ function adminCampaigns() {
       </div>
       <div class="adm-actions">
         <button type="button" class="btn btn--small" data-action="open-campaign" data-id="${esc(c.id)}">See ${icon('arrow', 2)}</button>
-        <button type="button" class="btn btn--small" data-action="campaign-delete" data-id="${esc(c.id)}">${icon('x', 2)} Remove</button>
+        <button type="button" class="btn btn--small btn--danger" data-action="campaign-delete" data-id="${esc(c.id)}">${icon('x', 2)} Remove</button>
       </div>
     </li>`).join('')}</ul>`;
 }
@@ -2128,7 +2128,7 @@ function adminUpcomingGames() {
       <ul class="adm-games">${rankGames(d.key).ranked.map(({ g, voters }) => `
         <li>${gameLink(g)}
           <span class="adm-sub">${plural(voters.length, 'vote')}${g.by ? ` · added by ${esc(playerName(g.by))}` : ''}</span>
-          <button type="button" class="icon-btn icon-btn--small" data-action="admin-remove-game" data-date="${d.key}" data-gk="${esc(voteKey(g))}" aria-label="Remove ${esc(g.name)} from this day">${icon('x', 2)}</button>
+          <button type="button" class="icon-btn icon-btn--small icon-btn--danger" data-action="admin-remove-game" data-date="${d.key}" data-gk="${esc(voteKey(g))}" aria-label="Remove ${esc(g.name)} from this day">${icon('x', 2)}</button>
         </li>`).join('')}</ul>
     </div>`).join('')}</div>`;
 }
