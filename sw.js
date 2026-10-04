@@ -25,6 +25,7 @@ const SHELL = [
   'js/admin.js',
   'js/avatar.js',
   'js/campaigns.js',
+  'js/collection.js',
   'js/dates.js',
   'js/games.js',
   'js/hall.js',

@@ -11,6 +11,10 @@
 //   campaigns/{id}      a long game played over several sessions:
 //                       { game, title, players: [id], names, status: 'active'|'finished', locked,
 //                         startedAt, next, finishedAt, winner, createdBy }
+//   sharedGames/{key}   a game that was played although nobody had it in a collection (the key is
+//                       the game's voteKey); the group's collection is the players' collections plus these
+//                       { gameId, name, year, source: 'played' }
+//   feedback/{id}       a message from "Send feedback": { message, name, by, createdAt, seen? }; only admins read
 //   admins/{uid}        created by hand in the Firebase console; makes that Google
 //                       account an admin (see firestore.rules and the README)
 // Availability and games use arrayUnion/arrayRemove, so two people saving at the
@@ -22,10 +26,11 @@ import {
 } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
 import {
   getFirestore, collection, doc, onSnapshot, getDocs, addDoc, updateDoc, setDoc, deleteDoc, writeBatch,
-  arrayUnion, arrayRemove, deleteField, query, where, orderBy, limit, documentId, serverTimestamp,
+  arrayUnion, arrayRemove, deleteField, query, where, orderBy, limit, documentId, serverTimestamp, Timestamp,
 } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
 import { voteKey } from './games.js';
 import { toPlain } from './admin.js';
+import { sharedDoc } from './collection.js';
 
 export function create(config) {
   const app = initializeApp(config);
@@ -35,6 +40,8 @@ export function create(config) {
   const daysCol = collection(db, 'days');
   const playsCol = collection(db, 'plays');
   const campaignsCol = collection(db, 'campaigns');
+  const sharedCol = collection(db, 'sharedGames');
+  const feedbackCol = collection(db, 'feedback');
 
   return {
     mode: 'firebase',
@@ -151,9 +158,9 @@ export function create(config) {
     // no special permission; only the Admin page offers it.) Admin accounts are not included.
     async exportAll() {
       const read = async (col) => (await getDocs(col)).docs.map((d) => ({ id: d.id, ...toPlain(d.data()) }));
-      const [players, days, plays, campaigns] = await Promise.all([read(playersCol), read(daysCol), read(playsCol), read(campaignsCol)]);
+      const [players, days, plays, campaigns, sharedGames] = await Promise.all([read(playersCol), read(daysCol), read(playsCol), read(campaignsCol), read(sharedCol)]);
       const byId = (rows) => Object.fromEntries(rows.map(({ id, ...rest }) => [id, rest]));
-      return { players: byId(players), days: byId(days), plays, campaigns };
+      return { players: byId(players), days: byId(days), plays, campaigns, sharedGames };
     },
 
     // Campaigns: long games played over several sessions. A campaign's sessions are plays
@@ -206,6 +213,73 @@ export function create(config) {
         if (i === 0) batch.delete(doc(playersCol, id));
         for (const ref of chunk) batch.set(ref, { players: arrayRemove(id) }, { merge: true });
         await batch.commit();
+      }
+    },
+
+    // The group's collection also holds games that were played though nobody had them listed.
+    subscribeSharedGames(onData, onError) {
+      return onSnapshot(sharedCol, (snap) => {
+        onData(snap.docs.map((d) => {
+          const v = d.data();
+          return { key: d.id, ...v, createdAt: v.createdAt?.toMillis?.() ?? 0 };
+        }));
+      }, onError);
+    },
+
+    // Quietly does nothing if it is already there (the rules only allow creating it).
+    addSharedGame: (game) => setDoc(doc(sharedCol, voteKey(game)), { ...sharedDoc(game), createdAt: serverTimestamp() }),
+
+    // Admin only (the rules enforce it): takes a game out of the whole group's collection, and out of
+    // every player's list that has it. `updates` is [{ playerId, games }], the list each should have after.
+    async removeSharedGame(key, updates) {
+      const batch = writeBatch(db);
+      batch.delete(doc(sharedCol, key));
+      for (const { playerId, games } of updates) batch.update(doc(playersCol, playerId), { games });
+      await batch.commit();
+    },
+
+    // Feedback from the "Send feedback" link. Anyone can send; only an admin can read it.
+    subscribeFeedback(onData, onError) {
+      const q = query(feedbackCol, orderBy('createdAt', 'desc'), limit(200));
+      return onSnapshot(q, (snap) => {
+        onData(snap.docs.map((d) => {
+          const v = d.data();
+          return { id: d.id, ...v, seen: !!v.seen, createdAt: v.createdAt?.toMillis?.() ?? 0 };
+        }));
+      }, onError);
+    },
+    sendFeedback: ({ message, name, by }) => addDoc(feedbackCol, { message, name, by, createdAt: serverTimestamp() }),
+    markFeedback: (id, seen) => updateDoc(doc(feedbackCol, id), { seen }),
+    deleteFeedback: (id) => deleteDoc(doc(feedbackCol, id)),
+
+    // Admin only: tidying old days. Lists every day's date, then removes the ones asked for, at most
+    // 400 to a batch.
+    async listDayKeys() { return (await getDocs(daysCol)).docs.map((d) => d.id); },
+
+    async deleteDays(keys) {
+      for (let i = 0; i < keys.length; i += 400) {
+        const batch = writeBatch(db);
+        for (const key of keys.slice(i, i + 400)) batch.delete(doc(daysCol, key));
+        await batch.commit();
+      }
+    },
+
+    // Admin only: puts a backup back (see restoreOps in admin.js). Each entry is written under the id it
+    // had, 400 to a batch, and nothing is deleted. Dates that the backup holds as text go back in as
+    // timestamps, so ordering keeps working.
+    async restoreAll(ops, onProgress) {
+      const withTimes = (data) => {
+        if (!('createdAt' in data)) return data;
+        const v = data.createdAt;
+        const ms = typeof v === 'string' ? Date.parse(v) : typeof v === 'number' ? v : NaN;
+        const { createdAt, ...rest } = data;
+        return Number.isNaN(ms) ? rest : { ...rest, createdAt: Timestamp.fromMillis(ms) };
+      };
+      for (let i = 0; i < ops.length; i += 400) {
+        const batch = writeBatch(db);
+        for (const { col, id, data } of ops.slice(i, i + 400)) batch.set(doc(db, col, id), withTimes(data));
+        await batch.commit();
+        onProgress?.(Math.min(i + 400, ops.length), ops.length);
       }
     },
 

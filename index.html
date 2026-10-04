@@ -19,7 +19,7 @@
       }
       var root = document.documentElement;
       root.setAttribute('data-theme', theme);
-      root.setAttribute('data-page', location.hash === '#hall' ? 'hall' : location.hash === '#campaigns' ? 'campaigns' : 'calendar');
+      root.setAttribute('data-page', location.hash === '#hall' ? 'hall' : location.hash === '#campaigns' ? 'campaigns' : location.hash === '#players' ? 'players' : 'calendar');
     })();
   </script>
   <link rel="icon" id="favicon" href="data:,">
@@ -49,6 +49,7 @@
       <a id="tab-calendar" class="tab" href="#calendar"></a>
       <a id="tab-campaigns" class="tab" href="#campaigns"></a>
       <a id="tab-hall" class="tab" href="#hall"></a>
+      <a id="tab-players" class="tab" href="#players"></a>
       <a id="tab-admin" class="tab" href="#admin" hidden></a>
     </nav>
 
@@ -70,7 +71,6 @@
           <ul id="legend" class="legend"></ul>
         </section>
 
-        <section id="players" class="players" hidden></section>
       </div>
 
       <div id="view-campaigns" hidden>
@@ -93,6 +93,16 @@
         </section>
       </div>
 
+      <div id="view-players" hidden>
+        <section class="board players" aria-labelledby="players-title">
+          <div class="board-head">
+            <h2 id="players-title">Players</h2>
+            <span id="players-count" class="range"></span>
+          </div>
+          <div id="players-body"></div>
+        </section>
+      </div>
+
       <div id="view-admin" hidden>
         <section class="board admin" aria-labelledby="admin-title">
           <div class="board-head">
@@ -106,7 +116,7 @@
 
     <footer class="foot">
       <p>Game links go to <a href="https://boardgamegeek.com" target="_blank" rel="noopener noreferrer">BoardGameGeek</a>. Not affiliated with BGG.</p>
-      <p><a href="help.html">How it works</a></p>
+      <p><a href="help.html">How it works</a> · <button type="button" class="link-btn" data-action="feedback">Send feedback</button></p>
       <p id="install-slot" class="foot-admin"></p>
       <p id="admin-slot" class="foot-admin"></p>
     </footer>

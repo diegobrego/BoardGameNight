@@ -4,6 +4,7 @@
 import { randomSeed, hueOf } from './avatar.js';
 import { upcomingDays, dateKey } from './dates.js';
 import { voteKey } from './games.js';
+import { sharedDoc } from './collection.js';
 
 const KEY = 'bgn.demo.v3';
 
@@ -63,6 +64,8 @@ function seed() {
     details: { place: "Leo's flat", time: '20:00' },
   };
   days[daysAgo(4)] = { players: ['demo0', 'demo3'], games: [] };
+  // older days, so "Tidy old days" on the Admin page has something to count
+  for (const ago of [20, 45, 75, 120, 200, 400]) days[daysAgo(ago)] = { players: ['demo0', 'demo1'], games: [] };
 
   const namesOf = (ids) => Object.fromEntries(ids.map((id) => [id, players[id].name]));
   let n = 0;
@@ -110,7 +113,14 @@ function seed() {
       status: 'active', startedAt: daysAgo(3), next: '', finishedAt: '', winner: null, locked: true,
     }),
   ];
-  return { players, days, plays, campaigns };
+  // a game that was played although nobody had it in a collection, and a few messages for the admin
+  const sharedGames = [{ key: 'n_homebrew_quest', gameId: null, name: 'Homebrew Quest', year: 0, source: 'played', createdAt: Date.now() - 3 * 86400000 }];
+  const feedback = [
+    { id: 'fb1', message: 'Could the calendar show the time of each game night?', name: 'Zoe', by: 'demo2', createdAt: Date.now() - 2 * 86400000, seen: false },
+    { id: 'fb2', message: 'Love the campaigns tab!', name: '', by: '', createdAt: Date.now() - 6 * 86400000, seen: true },
+  ];
+  campaigns[0].notes = 'Chapter 1: the empire sets out. Mia plays the red empire, Leo the blue one.\nHouse rule: reach cards are shuffled back in each chapter.';
+  return { players, days, plays, campaigns, sharedGames, feedback };
 }
 
 function load() {
@@ -120,6 +130,8 @@ function load() {
       const saved = JSON.parse(raw);
       saved.plays ??= [];
       saved.campaigns ??= [];
+      saved.sharedGames ??= [];
+      saved.feedback ??= [];
       return saved;
     }
   } catch { /* fall through to a fresh seed */ }
@@ -131,15 +143,21 @@ export function create() {
   const listeners = new Set();
   const playListeners = new Set();
   const campaignListeners = new Set();
+  const sharedListeners = new Set();
+  const feedbackListeners = new Set();
   const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* private mode */ } };
   const emit = () => listeners.forEach((fn) => fn({ players: state.players, days: state.days, synced: true }));
   const emitPlays = () => playListeners.forEach((fn) => fn([...state.plays]));
   const emitCampaigns = () => campaignListeners.forEach((fn) => fn([...state.campaigns]));
+  const emitShared = () => sharedListeners.forEach((fn) => fn(state.sharedGames.map((g) => ({ ...g }))));
+  const feedbackRows = () => state.feedback.map((f) => ({ ...f })).sort((a, b) => b.createdAt - a.createdAt);   // newest first, like the shared site
+  const emitFeedback = () => feedbackListeners.forEach((fn) => fn(feedbackRows()));
+  const toMs = (v) => (typeof v === 'string' ? Date.parse(v) || 0 : v ?? 0);   // backups from the shared site hold dates as text
   persist();
 
   // Keep several open tabs of the demo in step.
   window.addEventListener('storage', (e) => {
-    if (e.key === KEY) { state = load(); emit(); emitPlays(); emitCampaigns(); }
+    if (e.key === KEY) { state = load(); emit(); emitPlays(); emitCampaigns(); emitShared(); emitFeedback(); }
   });
 
   const day = (date) => (state.days[date] ??= { players: [], games: [] });
@@ -261,7 +279,11 @@ export function create() {
     // Everything, for the admin's backup download.
     async exportAll() {
       return JSON.parse(JSON.stringify({
-        players: state.players, days: state.days, plays: state.plays, campaigns: state.campaigns,
+        players: state.players,
+        days: state.days,
+        plays: state.plays,
+        campaigns: state.campaigns,
+        sharedGames: state.sharedGames.map(({ key, ...rest }) => ({ id: key, ...rest })),
       }));
     },
 
@@ -282,6 +304,74 @@ export function create() {
     async updateCampaign(id, patch) {
       Object.assign(state.campaigns.find((c) => c.id === id), patch);
       persist(); emitCampaigns();
+    },
+
+    // The group's collection also holds games that were played though nobody had them listed.
+    subscribeSharedGames(fn) {
+      sharedListeners.add(fn);
+      queueMicrotask(() => fn(state.sharedGames.map((g) => ({ ...g }))));
+      return () => sharedListeners.delete(fn);
+    },
+
+    async addSharedGame(game) {
+      const key = voteKey(game);
+      if (state.sharedGames.some((g) => g.key === key)) return;
+      state.sharedGames.push({ key, ...sharedDoc(game), createdAt: Date.now() });
+      persist(); emitShared();
+    },
+
+    // Admin only: takes a game out of the whole group's collection. `updates` is [{ playerId, games }],
+    // the list each player who had it should have afterwards.
+    async removeSharedGame(key, updates) {
+      state.sharedGames = state.sharedGames.filter((g) => g.key !== key);
+      for (const { playerId, games } of updates) if (state.players[playerId]) state.players[playerId].games = games;
+      persist(); emit(); emitShared();
+    },
+
+    // Feedback from the "Send feedback" link. Only the Admin page reads it.
+    subscribeFeedback(fn) {
+      feedbackListeners.add(fn);
+      queueMicrotask(() => fn(feedbackRows()));
+      return () => feedbackListeners.delete(fn);
+    },
+
+    async sendFeedback({ message, name, by }) {
+      state.feedback.push({ id: newId('fb'), message, name, by, createdAt: Date.now(), seen: false });
+      persist(); emitFeedback();
+    },
+
+    async markFeedback(id, seen) {
+      const f = state.feedback.find((x) => x.id === id);
+      if (f) f.seen = seen;
+      persist(); emitFeedback();
+    },
+
+    async deleteFeedback(id) {
+      state.feedback = state.feedback.filter((f) => f.id !== id);
+      persist(); emitFeedback();
+    },
+
+    // Admin only: tidying old days.
+    async listDayKeys() { return Object.keys(state.days); },
+
+    async deleteDays(keys) {
+      for (const k of keys) delete state.days[k];
+      persist(); emit();
+    },
+
+    // Admin only: puts a backup back (see restoreOps in admin.js). Writes entries under the id they had
+    // and deletes nothing.
+    async restoreAll(ops, onProgress) {
+      const upsert = (list, row, keyOf) => { const i = list.findIndex((x) => keyOf(x) === keyOf(row)); if (i >= 0) list[i] = row; else list.push(row); };
+      ops.forEach(({ col, id, data }, i) => {
+        if (col === 'players') state.players[id] = { id, ...data };
+        else if (col === 'days') state.days[id] = data;
+        else if (col === 'campaigns') upsert(state.campaigns, { ...data, id, createdAt: toMs(data.createdAt) }, (x) => x.id);
+        else if (col === 'plays') upsert(state.plays, { ...data, id, createdAt: toMs(data.createdAt) }, (x) => x.id);
+        else if (col === 'sharedGames') upsert(state.sharedGames, { ...data, key: id, createdAt: toMs(data.createdAt) }, (x) => x.key);
+        onProgress?.(i + 1, ops.length);
+      });
+      persist(); emit(); emitPlays(); emitCampaigns(); emitShared();
     },
 
     // `people` is [{ id, name }]

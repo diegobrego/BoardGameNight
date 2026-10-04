@@ -10,7 +10,8 @@ import { pastDays, upcomingDays } from '../js/dates.js';
 import { sessionsOf, plannedOn, campaignRecord, sortCampaigns, defaultTitle, can, outsiders } from '../js/campaigns.js';
 import { MAX_MY_GAMES, hasGame, withGame, withoutGame, toggleFav, ordered, matchMine } from '../js/mygames.js';
 import { voteKey } from '../js/games.js';
-import { toPlain, buildBackup, backupName, withoutUndefined, buildPlay } from '../js/admin.js';
+import { toPlain, buildBackup, backupName, withoutUndefined, buildPlay, parseBackup, restoreOps, cutoffFor, oldDayKeys } from '../js/admin.js';
+import { buildCatalog, ownedKeys, nobodyOwns, sortCatalog, withoutGameFrom, sharedDoc } from '../js/collection.js';
 
 const encoder = new TextEncoder();
 const root = new URL('..', import.meta.url);
@@ -374,7 +375,7 @@ const root = new URL('..', import.meta.url);
 
   const now = new Date(Date.UTC(2026, 9, 4, 18, 30));
   const backup = buildBackup({ players: { p1: { name: 'Mia' } }, days: { '2026-10-05': {}, '2026-10-06': {} }, plays: [{ id: 'a' }], campaigns: [] }, now);
-  assert.deepEqual(backup.counts, { players: 1, days: 2, plays: 1, campaigns: 0 });
+  assert.deepEqual(backup.counts, { players: 1, days: 2, plays: 1, campaigns: 0, sharedGames: 0 });
   assert.equal(backup.exportedAt, '2026-10-04T18:30:00.000Z');
   assert.equal(backup.app, 'board-game-night');
   assert.deepEqual(Object.keys(backup).filter((k) => ['admins', 'adminRequests'].includes(k)), [], 'admin accounts are not in a backup');
@@ -404,4 +405,89 @@ const root = new URL('..', import.meta.url);
   assert.match(err({ winner: 'p3' }), /one of the players/, 'the winner has to have played');
   assert.match(err({ note: 'x'.repeat(141) }), /note/);
   console.log('ok  admin page');
+}
+
+// ---- restoring a backup, and tidying old days --------------------------------------------
+{
+  const now = new Date(Date.UTC(2026, 9, 4, 18, 30));
+  const data = {
+    players: { p1: { name: 'Mia', avatar: 3, games: [{ id: 13, name: 'Catan', year: 1995 }] }, p2: { name: 'Leo', avatar: 4 } },
+    days: { '2026-10-05': { players: ['p1'], games: [] } },
+    plays: [{ id: 'play1', date: '2026-10-01', game: { id: 13, name: 'Catan', year: 1995 }, winner: 'p1', players: ['p1', 'p2'], names: { p1: 'Mia', p2: 'Leo' } }],
+    campaigns: [{ id: 'c1', title: 'Arcs', game: { id: 359871, name: 'Arcs' }, players: ['p1'], status: 'active' }],
+    sharedGames: [{ id: 'g999', gameId: 999, name: 'Unlisted', year: 2020, source: 'played' }],
+  };
+  const text = JSON.stringify(buildBackup(data, now));
+  const parsed = parseBackup(text);
+  assert.ok(parsed.backup, 'a backup the site made reads back');
+  assert.deepEqual(parsed.summary.counts, { players: 2, days: 1, plays: 1, campaigns: 1, sharedGames: 1 });
+  assert.equal(parsed.summary.exportedAt, '2026-10-04T18:30:00.000Z');
+
+  // the writes: id kept as the document name, not repeated inside it
+  const ops = restoreOps(parsed.backup);
+  assert.deepEqual(ops.map((o) => `${o.col}/${o.id}`), ['players/p1', 'players/p2', 'days/2026-10-05', 'campaigns/c1', 'plays/play1', 'sharedGames/g999']);
+  assert.equal('id' in ops.find((o) => o.col === 'plays').data, false, 'the id is the document name, not a field');
+  assert.equal(ops.find((o) => o.col === 'sharedGames').data.gameId, 999, 'the game id inside a shared game stays');
+
+  // an older backup without shared games still restores
+  const older = JSON.parse(text); delete older.sharedGames;
+  assert.equal(parseBackup(JSON.stringify(older)).summary.counts.sharedGames, 0);
+
+  // things that are not, or not quite, a backup
+  assert.match(parseBackup('not json').error, /isn't a backup/);
+  assert.match(parseBackup('{"hello":1}').error, /isn't a Board Game Night backup/);
+  assert.match(parseBackup(JSON.stringify({ ...older, format: 2 })).error, /newer version/);
+  assert.match(parseBackup(JSON.stringify({ ...older, players: { p1: {} } })).error, /no name/);
+  assert.match(parseBackup(JSON.stringify({ ...older, days: { tomorrow: {} } })).error, /not a day/);
+  assert.match(parseBackup(JSON.stringify({ ...older, plays: [{ id: 'x' }] })).error, /logged games/);
+  assert.match(parseBackup(JSON.stringify({ ...older, campaigns: [{ id: 'x' }] })).error, /campaigns/);
+  assert.match(parseBackup(JSON.stringify({ ...older, plays: {} })).error, /damaged/);
+
+  // tidying old days
+  assert.equal(cutoffFor('2026-10-04', 30), '2026-09-04');
+  assert.equal(cutoffFor('2026-03-01', 1), '2026-02-28', 'month ends are handled');
+  assert.equal(cutoffFor('2026-01-10', 365), '2025-01-10');
+  const keys = ['2026-10-05', '2026-09-03', '2026-09-04', '2025-01-01', 'junk'];
+  assert.deepEqual(oldDayKeys(keys, '2026-09-04'), ['2025-01-01', '2026-09-03'], 'older than the cutoff; the cutoff day and the future stay; junk is ignored');
+  assert.deepEqual(oldDayKeys([], '2026-09-04'), []);
+  console.log('ok  restore and tidy');
+}
+
+// ---- the group's game collection ---------------------------------------------------------
+{
+  const players = {
+    p1: { id: 'p1', games: [{ id: 13, name: 'Catan' }, { id: 230802, name: 'Azul' }] },
+    p2: { id: 'p2', games: [{ id: 13, name: 'Catan' }, { id: null, name: 'Homebrew Quest' }] },
+    p3: { id: 'p3' },
+  };
+  const shared = [{ gameId: 999, name: 'Unlisted', year: 2020 }, { gameId: 13, name: 'Catan' }];
+  const catalog = buildCatalog(players, shared);
+  assert.deepEqual(catalog.map((e) => e.game.name).sort(), ['Azul', 'Catan', 'Homebrew Quest', 'Unlisted'], 'one entry per game, however many people have it');
+  const catan = catalog.find((e) => e.key === 'g13');
+  assert.deepEqual(catan.owners, ['p1', 'p2'], 'who has it');
+  assert.equal(catan.shared, true, 'and it is also on the played-but-unlisted list');
+  assert.deepEqual(catalog.find((e) => e.key === 'g999').owners, [], 'a played game nobody listed has no owners');
+  assert.equal(catalog.find((e) => e.key === 'g999').game.id, 999, 'its BGG id comes from gameId');
+
+  const owned = ownedKeys(players, shared);
+  assert.equal(nobodyOwns({ id: 230802, name: 'Azul' }, owned), false, 'Azul is in a collection');
+  assert.equal(nobodyOwns({ id: 999, name: 'Unlisted' }, owned), false, 'a played game counts as owned: someone has to own it');
+  assert.equal(nobodyOwns({ id: 266192, name: 'Wingspan' }, owned), true, 'nobody has Wingspan');
+  assert.equal(nobodyOwns({ id: null, name: 'homebrew quest' }, owned), false, 'a game added by name matches by its name');
+
+  // removing a game from a collection: it leaves the group's collection unless someone else has it
+  const afterP1 = { ...players, p1: { ...players.p1, games: players.p1.games.filter((g) => g.id !== 13) } };
+  assert.equal(ownedKeys(afterP1, []).has('g13'), true, 'Mia took Catan off, Leo still has it');
+  const afterBoth = { ...afterP1, p2: { ...players.p2, games: players.p2.games.filter((g) => g.id !== 13) } };
+  assert.equal(ownedKeys(afterBoth, []).has('g13'), false, 'nobody has it any more');
+
+  assert.deepEqual(sortCatalog(catalog).map((e) => e.game.name), ['Unlisted', 'Azul', 'Catan', 'Homebrew Quest'], 'games nobody listed first, then A to Z');
+
+  // what the admin removing a game from the whole group changes
+  const gone = withoutGameFrom(players, 'g13');
+  assert.deepEqual(gone.map((u) => u.playerId), ['p1', 'p2']);
+  assert.deepEqual(gone.find((u) => u.playerId === 'p1').games.map((g) => g.name), ['Azul']);
+  assert.deepEqual(withoutGameFrom(players, 'g1'), [], 'nothing to change if nobody has it');
+  assert.deepEqual(sharedDoc({ id: 999, name: 'Unlisted', year: 2020 }), { gameId: 999, name: 'Unlisted', year: 2020, source: 'played' });
+  console.log('ok  game collection');
 }

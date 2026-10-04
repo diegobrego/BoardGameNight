@@ -20,8 +20,10 @@
 //               players: [id], names: { [id]: name }, loggedBy, createdAt }
 //   logPlay(play) -> id        updatePlay(id, patch)    deletePlay(id)   (the last two: admin only)
 //       (in a patch, a field set to undefined is removed)
-//   exportAll() -> { players, days, plays, campaigns }   for the admin's backup download
 //       a play may also carry  note  and  campaign (a campaign id: it is a session of that campaign)
+//   exportAll() -> { players, days, plays, campaigns, sharedGames }   for the admin's backup download
+//   restoreAll(ops, onProgress)   admin: write a backup back, ops from restoreOps() in admin.js
+//   listDayKeys() -> [date]       deleteDays([date])     admin: tidying old days
 //
 // Campaigns (long games over several sessions, e.g. Arcs or Oath):
 //   subscribeCampaigns(onData(campaigns[]), onError) -> unsubscribe
@@ -29,6 +31,15 @@
 //                   startedAt, next, finishedAt, winner, createdBy, createdAt }
 //   createCampaign(campaign) -> id    updateCampaign(id, patch)    deleteCampaign(id)
 //   addCampaignPlayers(id, [{ id, name }])    removeCampaignPlayer(id, playerId)
+//       a campaign may also carry  notes  (text kept by the people in it)
+//
+// The group's collection (players' collections + games played though nobody had them):
+//   subscribeSharedGames(onData(games[]), onError) -> unsubscribe     games: { key, gameId, name, year, source }
+//   addSharedGame({ id, name, year })      removeSharedGame(key, [{ playerId, games }])   (the last: admin only)
+//
+// Feedback ("Send feedback" link; only admins read it):
+//   sendFeedback({ message, name, by })    subscribeFeedback(onData(rows[]), onError) -> unsubscribe
+//   markFeedback(id, seen)    deleteFeedback(id)
 //
 // Admin tools:
 //   deletePlayer(id)                     removes the player and takes them off every day

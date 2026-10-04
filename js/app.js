@@ -7,7 +7,8 @@ import { buildIcs } from './ics.js';
 import { tally, ranked as rankList, newestFirst, playerStats, awardTitles } from './hall.js';
 import { sessionsOf, plannedOn, campaignRecord, sortCampaigns, defaultTitle, can, outsiders } from './campaigns.js';
 import { MAX_MY_GAMES, hasGame, withGame, withoutGame, toggleFav, ordered, matchMine } from './mygames.js';
-import { buildBackup, backupName, buildPlay, withoutUndefined } from './admin.js';
+import { buildBackup, backupName, buildPlay, withoutUndefined, parseBackup, restoreOps, cutoffFor, oldDayKeys } from './admin.js';
+import { buildCatalog, ownedKeys, nobodyOwns, sortCatalog, withoutGameFrom } from './collection.js';
 import {
   loadGames, isLoaded, findGame, searchGames, bggUrl, bggSearchUrl, parseBggLink, titleFromSlug, voteKey,
 } from './games.js';
@@ -84,8 +85,9 @@ let adminOn = false;
 const viewFromHash = () => (
   location.hash === '#hall' ? 'hall'
     : location.hash === '#campaigns' ? 'campaigns'
-      : location.hash === '#admin' && adminOn ? 'admin'
-        : 'calendar'
+      : location.hash === '#players' ? 'players'
+        : location.hash === '#admin' && adminOn ? 'admin'
+          : 'calendar'
 );
 
 const state = {
@@ -115,6 +117,18 @@ const state = {
   finish: null,              // state of the "Finish campaign" popup
   addPeople: null,           // state of the "Add players" popup of a campaign
   edit: null,                // state of the admin's "edit a hall-of-fame entry" form
+  sharedGames: [],           // games that were played though nobody had them listed (part of the group's collection)
+  sharedReady: false,
+  sharedError: false,        // that list couldn't be loaded (e.g. rules not updated yet)
+  feedback: [],              // messages from "Send feedback" (loaded for admins only)
+  feedbackError: false,
+  playersFilter: '',         // the Players page's search box
+  notesFor: null,            // the campaign whose notes are being edited
+  adminSelectedGame: null,   // the game picked in the Admin page's game collection
+  restore: null,             // the backup file chosen for a restore: { name, backup, summary, error, busy, note }
+  oldDays: null,             // every stored day's date, once "Check old days" has looked (Admin page)
+  tidyBusy: false,
+  tidyNote: '',
   adminSelected: null,       // the player picked on the Admin page (their details and remove button show)
   adminAllPlays: false,      // the Admin page lists every logged game, not just the newest
   backupNote: '',            // what the last backup download contained
@@ -251,6 +265,8 @@ function renderStatic() {
   $('#tab-hall').innerHTML = `${icon('trophy', 2)}<span>Hall of fame</span>`;
   $('#tab-admin').innerHTML = `${icon('shield', 2)}<span>Admin</span>`;
   $('#admin-title').innerHTML = `${icon('shield', 3)}<span>Admin</span>`;
+  $('#tab-players').innerHTML = `${icon('meeple', 2)}<span>Players</span>`;
+  $('#players-title').innerHTML = `${icon('meeple', 3)}<span>Players</span>`;
   $('#campaigns-title').innerHTML = `${icon('flag', 3)}<span>Campaigns</span>`;
   $('#hall-title').innerHTML = `${icon('trophy', 3)}<span>Hall of fame</span>`;
   applyTheme(preferredTheme(), false);   // also catches a device change that landed after the inline script ran
@@ -389,23 +405,58 @@ function renderCalendar() {
   if (focused) $(`[data-date="${focused}"]`, el)?.focus({ preventScroll: true });
 }
 
-// "Players" under the calendar: a collapsible list. Closed (the default) it shows just the faces,
-// open it shows everyone by name; tap anyone for their player card. (Removing a player is done on
-// the Admin page, not here.)
-function renderPlayers() {
-  const el = $('#players');
-  el.hidden = !state.ready;
-  if (!state.ready) return;
-  const list = sortedPlayers();
-  if (!list.length) {
-    el.innerHTML = '<h2 class="h-small">Players</h2><p class="muted">Nobody has joined yet. Be the first!</p>';
+// The Players page (its own tab): everyone in the group, with a few numbers. Tap a row for that
+// player's card. Removing a player is done on the Admin page.
+function renderPlayersPage() {
+  const body = $('#players-body');
+  const count = $('#players-count');
+  if (!state.ready) {
+    body.innerHTML = '<p class="loading">Loading…</p>';
+    count.textContent = '';
     return;
   }
-  const faces = `<div class="fold-preview"><ul class="player-faces">${list.map((p) => `
-      <li><button type="button" class="face-btn${p.id === state.me ? ' is-me' : ''}" style="--h:${hueOf(p.avatar)}" data-action="player-card" data-id="${esc(p.id)}" title="${esc(p.name)}${p.id === state.me ? ' (you)' : ''}" aria-label="Show ${esc(p.name)}'s card">${avatar(p.avatar, 30)}</button></li>`).join('')}</ul></div>`;
-  const names = `<ul class="player-list">${list.map((p) => `
-      <li class="player-item${p.id === state.me ? ' is-me' : ''}" style="--h:${hueOf(p.avatar)}"><button type="button" class="pill-btn" data-action="player-card" data-id="${esc(p.id)}" title="Show ${esc(p.name)}'s card">${avatar(p.avatar, 28)}<span>${esc(p.name)}${p.id === state.me ? ' <em>(you)</em>' : ''}</span></button></li>`).join('')}</ul>`;
-  el.innerHTML = fold('players', 'Players', { count: list.length, open: false, preview: faces, body: names });
+  const all = sortedPlayers();
+  count.textContent = plural(all.length, 'player');
+  if (!all.length) {
+    body.innerHTML = '<p class="muted">Nobody has joined yet. Be the first!</p>';
+    return;
+  }
+  // The search box lives outside the list, so typing in it keeps its focus while the list redraws.
+  if (!$('#pl-list', body)) {
+    body.innerHTML = `
+      <div class="field pl-search">
+        <label class="sr-only" for="pl-q">Find a player</label>
+        <input id="pl-q" type="search" placeholder="Find a player" spellcheck="false" value="${esc(state.playersFilter)}">
+      </div>
+      <ul id="pl-list" class="pl-list"></ul>`;
+  }
+  $('.pl-search', body).hidden = all.length <= 8;     // a short list needs no search
+  const q = all.length > 8 ? state.playersFilter.trim().toLowerCase() : '';
+  const shown = q ? all.filter((p) => p.name.toLowerCase().includes(q)) : all;
+  const titles = state.playsReady ? awardTitles(state.plays) : new Map();
+
+  $('#pl-list', body).innerHTML = shown.length ? shown.map((p) => {
+    const s = state.playsReady ? playerStats(state.plays, p.id) : null;
+    const mine = p.id === state.me;
+    const collection = p.games ?? [];
+    const favs = collection.filter((g) => g.fav);
+    const camps = state.campaigns.filter((c) => c.players?.includes(p.id)).length;
+    const tags = (titles.get(p.id) ?? []).map((t) => `<span class="title-tag title-tag--small">${esc(t)}</span>`).join('');
+    return `
+      <li class="pl-row${mine ? ' is-me' : ''}" style="--h:${hueOf(p.avatar)}">
+        <button type="button" class="pl-main" data-action="player-card" data-id="${esc(p.id)}" aria-label="Show ${esc(p.name)}'s card">
+          ${avatar(p.avatar, 44)}
+          <span class="pl-text">
+            <span class="pl-name">${esc(p.name)}${mine ? ' <em>(you)</em>' : ''}</span>
+            <span class="pl-sub">${s ? `${plural(s.games, 'game')} played · ${plural(s.wins, 'win')} · ${plural(s.nights, 'game night')}` : 'No stats yet'}</span>
+            <span class="pl-sub">${plural(collection.length, 'game')} in their collection${camps ? ` · ${plural(camps, 'campaign')}` : ''}</span>
+            ${favs.length ? `<span class="pl-sub pl-favs">${icon('star', 2)} ${esc(favs.slice(0, 3).map((g) => g.name).join(', '))}${favs.length > 3 ? ` +${favs.length - 3}` : ''}</span>` : ''}
+            ${tags ? `<span class="pl-tags">${tags}</span>` : ''}
+          </span>
+          ${icon('chevron', 2)}
+        </button>
+      </li>`;
+  }).join('') : '<li class="muted">Nobody by that name.</li>';
 }
 
 // Admin only. It's a convenience rather than a lock (the link just fills in a WhatsApp
@@ -608,7 +659,9 @@ function renderView() {
   const view = state.view;
   document.documentElement.dataset.page = view;
   $('#tab-admin').hidden = !adminOn;
-  for (const page of ['calendar', 'campaigns', 'hall', 'admin']) {
+  const unread = state.feedback.filter((f) => !f.seen).length;      // new feedback shows on the Admin tab
+  $('#tab-admin').innerHTML = `${icon('shield', 2)}<span>Admin</span>${unread ? `<span class="count" title="${plural(unread, 'new message')}">${unread}</span>` : ''}`;
+  for (const page of ['calendar', 'campaigns', 'hall', 'players', 'admin']) {
     $(`#view-${page}`).hidden = page !== view;
     const tab = $(`#tab-${page}`);
     if (page === view) tab.setAttribute('aria-current', 'page');
@@ -631,7 +684,7 @@ function renderAll() {
   renderToolbar();
   renderCalendar();
   renderLastWeek();
-  renderPlayers();
+  renderPlayersPage();
   renderCampaigns();
   renderHall();
   renderAdmin();
@@ -804,6 +857,7 @@ function renderDayPanel() {
   const { ranked, topVotes } = rankGames(key);
 
   // One game on the list. They come most-voted first (rankGames sorts them that way).
+  const owned = groupOwned();
   const row = ({ g, voters, bringers }) => {
     const by = state.players[g.by];
     const k = voteKey(g);
@@ -821,10 +875,13 @@ function renderDayPanel() {
         <li class="game${top ? ' is-top' : ''}">
           <span class="game-badge">${top ? `${icon('star', 2)}<span class="sr-only">Top pick</span>` : ''}</span>
           <div class="game-head">
-            <a class="game-link game-title" title="${esc(g.name)}" href="${g.id ? bggUrl(g.id) : bggSearchUrl(g.name)}" target="_blank" rel="noopener noreferrer">
-              <span class="game-name">${esc(g.name)}</span>${icon('arrow', 2)}
-              <span class="sr-only">(opens BoardGameGeek)</span>
-            </a>
+            <div class="game-left">
+              <a class="game-link game-title" title="${esc(g.name)}" href="${g.id ? bggUrl(g.id) : bggSearchUrl(g.name)}" target="_blank" rel="noopener noreferrer">
+                <span class="game-name">${esc(g.name)}</span>${icon('arrow', 2)}
+                <span class="sr-only">(opens BoardGameGeek)</span>
+              </a>
+              ${ownerFlag(g, owned)}
+            </div>
             ${by ? `<span class="game-by" title="Added by ${esc(by.name)}"><span class="sr-only">Added by </span>${avatar(by.avatar, 20)}<span>${esc(by.name)}</span></span>` : ''}
           </div>
           <button type="button" class="vote${voted ? ' is-on' : ''}${canAct ? '' : ' is-locked'}" data-action="vote" data-gk="${esc(k)}" aria-pressed="${voted}"${locked}
@@ -1451,6 +1508,7 @@ async function submitLog(form) {
   submit.disabled = true;
   try {
     await state.store.logPlay(play);
+    await ensureShared(play.game);
     // The session that was planned for this day (or earlier) is done now. Whatever day was chosen
     // for the next one takes its place.
     const campaign = L.campaignId ? state.campaigns.find((c) => c.id === L.campaignId) : null;
@@ -1530,6 +1588,14 @@ function campaignCard(c) {
     rights.reopen ? campaignBtn('campaign-reopen', c, `${icon('unlock', 2)} Reopen`) : '',
   ].join('');
 
+  // Shared notes: everyone in a running campaign can edit them; they stay readable once it is finished.
+  const notes = (c.notes ?? '').trim();
+  const notesFold = notes || rights.log ? fold(`notes-${c.id}`, 'Notes', {
+    open: false,
+    preview: notes ? `<div class="fold-preview"><p class="camp-peek muted">${esc(notes.split('\n')[0])}</p></div>` : '',
+    body: `${notes ? `<p class="camp-notes">${esc(notes)}</p>` : '<p class="muted">No notes yet.</p>'}${rights.log ? campaignBtn('campaign-notes', c, `${icon('plus', 2)} ${notes ? 'Edit notes' : 'Add notes'}`, 'btn--small') : ''}`,
+  }) : '';
+
   return `
     <li id="campaign-${esc(c.id)}" class="campaign${finished ? ' is-finished' : ''}">
       <div class="campaign-head">
@@ -1538,6 +1604,7 @@ function campaignCard(c) {
           <span class="game-name">${esc(g.name)}</span>${g.year ? `<span class="game-year">${g.year}</span>` : ''}${icon('arrow', 2)}
           <span class="sr-only">(opens BoardGameGeek)</span>
         </a>
+        ${ownerFlag(g, groupOwned())}
         ${finished ? `<span class="camp-state is-done">${icon('check', 2)}<span>Finished</span></span>` : joinState}
       </div>
       <p class="campaign-meta">
@@ -1550,6 +1617,7 @@ function campaignCard(c) {
       ${joinHint}
       ${playButtons ? `<div class="actions">${playButtons}</div>` : ''}
       ${peopleButtons ? `<div class="actions">${peopleButtons}</div>` : ''}
+      ${notesFold}
       ${list.length ? fold(`sessions-${c.id}`, 'Sessions', { count: list.length, open: false, body: `<ul class="sessions">${list.join('')}</ul>` }) : ''}
       ${rights.remove ? `<button type="button" class="btn btn--small" data-action="campaign-delete" data-id="${esc(c.id)}">Remove campaign</button>` : ''}
     </li>`;
@@ -2062,12 +2130,18 @@ function adminHall() {
 
 function adminBackup() {
   return `
-    <p>One file with everything the site stores: the players (and their collections), every day, the hall of fame and the campaigns. Admin accounts aren't in it.</p>
+    <h3 class="h-small adm-head">Download</h3>
+    <p>One file with everything the site stores: the players (and their collections), every day, the hall of fame, the campaigns, and the games that were played without being in anyone's collection. Admin accounts and feedback aren't in it.</p>
     <div class="adm-tools">
       <button type="button" class="btn btn--solid" data-action="admin-backup"${state.backupBusy ? ' disabled' : ''}>${icon('download', 2)} ${state.backupBusy ? 'Preparing…' : 'Download backup'}</button>
     </div>
     ${state.backupNote ? `<p class="adm-status" role="status">${esc(state.backupNote)}</p>` : ''}
-    <p class="muted">There's no restore button: the file is a safety copy to keep somewhere safe. If something is ever lost, everything needed to put it back is in there.</p>`;
+    <h3 class="h-small adm-head">Restore</h3>
+    <p>Put a backup back if something got lost or broken. Choose a file you downloaded here, and check what's in it before anything is written.</p>
+    <div class="adm-tools">
+      <label class="btn file-btn"><input id="restore-file" type="file" accept="application/json,.json" class="sr-only">${icon('upload', 2)} Choose a backup file…</label>
+    </div>
+    ${state.restore ? restorePreview(state.restore) : ''}`;
 }
 
 function renderAdmin() {
@@ -2075,17 +2149,21 @@ function renderAdmin() {
   if (!adminOn) { body.innerHTML = ''; return; }
   if (state.view !== 'admin') return;       // nothing to draw while another page is showing
   const players = Object.keys(state.players).length;
+  const unreadFeedback = state.feedback.filter((f) => !f.seen).length;
   $('#admin-count').textContent = `${plural(players, 'player')} · ${plural(state.campaigns.length, 'campaign')} · ${plural(state.plays.length, 'logged game')}`;
   body.innerHTML = `
     <p class="admin-intro muted">Only admins can see this page. New admins are still added by hand in the Firebase console (see the README).</p>
     ${fold('adm-players', 'Players', { count: players, body: adminPlayers() })}
+    ${fold('adm-catalog', 'Game collection', { count: buildCatalog(state.players, state.sharedGames).length, open: false, body: adminCatalog() })}
     ${fold('adm-upcoming', 'Campaigns and upcoming games', {
     count: state.campaigns.length,
     body: `<h3 class="h-small adm-head">All campaigns <span class="count">${state.campaigns.length}</span></h3>${adminCampaigns()}
       <h3 class="h-small adm-head">Games suggested for the next two weeks</h3>${adminUpcomingGames()}`,
   })}
     ${fold('adm-hall', 'Hall of fame', { count: state.plays.length, open: false, body: adminHall() })}
-    ${fold('adm-backup', 'Backup', { body: adminBackup() })}`;
+    ${fold('adm-feedback', 'Feedback', { count: unreadFeedback ? `${unreadFeedback} new` : state.feedback.length, open: unreadFeedback > 0, body: adminFeedback() })}
+    ${fold('adm-tidy', 'Tidy old days', { open: false, body: adminTidy() })}
+    ${fold('adm-backup', 'Backup and restore', { body: adminBackup() })}`;
 }
 
 // A game somebody suggested for a coming day, taken off that day's list (with its votes).
@@ -2119,7 +2197,7 @@ async function downloadBackup() {
     link.remove();
     setTimeout(() => URL.revokeObjectURL(link.href), 5000);
     const c = backup.counts;
-    state.backupNote = `Saved ${link.download}: ${plural(c.players, 'player')}, ${plural(c.days, 'day')}, ${plural(c.plays, 'logged game')}, ${plural(c.campaigns, 'campaign')}.`;
+    state.backupNote = `Saved ${link.download}: ${plural(c.players, 'player')}, ${plural(c.days, 'day')}, ${plural(c.plays, 'logged game')}, ${plural(c.campaigns, 'campaign')}, ${plural(c.sharedGames, 'shared game')}.`;
   } catch (err) {
     fail(err, "Couldn't make the backup. Please try again.");
   } finally {
@@ -2246,12 +2324,341 @@ async function submitPlayEdit(form) {
   try {
     if (E.id) await state.store.updatePlay(E.id, play);       // a cleared note or campaign is removed
     else await state.store.logPlay({ ...withoutUndefined(play), loggedBy: state.me ?? 'admin' });
+    await ensureShared(play.game);
     $('#form-dialog').close();
     toast(E.id ? 'Entry saved' : 'Entry added');
   } catch (err) {
     submit.disabled = false;
     fail(err, "Couldn't save the entry. If this keeps happening, the site owner may need to publish the updated database rules from the README.");
   }
+}
+
+// ---------------------------------------------------------------------------
+// the group's collection: who has which game, and the "!" for a game nobody has
+// ---------------------------------------------------------------------------
+
+// Every game anyone has in their collection, plus games that were played although nobody had them
+// listed (they are kept on a small shared list). Nothing is stored twice: take a game off your own list
+// and it leaves the group's collection too, unless somebody else has it. A game on a day's list that
+// isn't in the group's collection gets an orange "!".
+const groupOwned = () => ownedKeys(state.players, state.sharedGames);
+
+const ownerFlag = (game, owned) => (state.ready && (state.sharedReady || state.sharedError) && nobodyOwns(game, owned)
+  ? `<button type="button" class="no-owner" data-action="no-owner" data-name="${esc(game.name)}" title="Nobody has ${esc(game.name)} in their collection yet" aria-label="Nobody has ${esc(game.name)} in their collection yet">!</button>`
+  : '');
+
+// A game that was played has to be owned by somebody. If it isn't in anyone's collection yet, it goes on
+// the shared list. Quietly does nothing if that isn't possible (say, the new rules aren't published yet).
+async function ensureShared(game) {
+  if (!game?.name || groupOwned().has(voteKey(game))) return;
+  try {
+    await state.store.addSharedGame({ id: game.id ?? null, name: game.name, year: game.year || 0 });
+  } catch (err) {
+    console.warn("Couldn't add the game to the group's collection:", err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// campaign notes: a shared note for the people in a running campaign
+// ---------------------------------------------------------------------------
+
+function openNotes(id) {
+  const c = state.campaigns.find((x) => x.id === id);
+  if (!c) return;
+  if (!myRights(c).log) return toast('Only people in a running campaign can edit its notes.');
+  state.notesFor = id;
+  openSheet(`Notes: ${c.title}`, `
+    <form id="notes-form" class="adm-form" autocomplete="off">
+      <p class="muted">Shared by everyone in the campaign: where you left off, house rules, who plays which faction. Up to 2000 characters.</p>
+      <label class="sr-only" for="notes-text">Notes</label>
+      <textarea id="notes-text" rows="9" maxlength="2000">${esc(c.notes ?? '')}</textarea>
+      <p id="notes-error" class="error" role="alert" hidden></p>
+      <div class="row">
+        <button type="button" class="btn" data-action="close-dialog">Cancel</button>
+        <button type="submit" class="btn btn--solid">Save notes</button>
+      </div>
+    </form>`);
+  $('#notes-text').focus();
+}
+
+async function submitNotes(form) {
+  const c = state.campaigns.find((x) => x.id === state.notesFor);
+  if (!c || !myRights(c).log) return;
+  const submit = form.querySelector('[type="submit"]');
+  submit.disabled = true;
+  try {
+    await state.store.updateCampaign(c.id, { notes: $('#notes-text').value.trim() });
+    $('#form-dialog').close();
+    toast('Notes saved');
+  } catch (err) {
+    submit.disabled = false;
+    fail(err, "Couldn't save the notes. If this keeps happening, the site owner may need to publish the updated database rules from the README.");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// feedback: a message anyone can send from the footer, which only an admin can read
+// ---------------------------------------------------------------------------
+
+function openFeedback() {
+  openSheet('Send feedback', `
+    <form id="feedback-form" class="adm-form" autocomplete="off">
+      <p class="muted">Something broken, confusing or missing? Tell us. The admin reads these on the Admin page.</p>
+      <label class="field"><span>Your message</span>
+        <textarea id="fb-text" rows="5" maxlength="1000" required placeholder="What would you like to say?"></textarea>
+      </label>
+      <label class="field"><span>Your name (optional)</span>
+        <input id="fb-name" maxlength="20" placeholder="So we know who to ask" value="${esc(state.players[state.me]?.name ?? '')}">
+      </label>
+      <p id="fb-error" class="error" role="alert" hidden></p>
+      <div class="row">
+        <button type="button" class="btn" data-action="close-dialog">Cancel</button>
+        <button type="submit" class="btn btn--solid">Send</button>
+      </div>
+    </form>`);
+  $('#fb-text').focus();
+}
+
+async function submitFeedback(form) {
+  const message = $('#fb-text').value.trim();
+  const error = $('#fb-error');
+  if (!message) {
+    error.textContent = 'Write a message first.';
+    error.hidden = false;
+    return;
+  }
+  const submit = form.querySelector('[type="submit"]');
+  submit.disabled = true;
+  try {
+    await state.store.sendFeedback({ message, name: $('#fb-name').value.trim().replace(/\s+/g, ' '), by: state.me ?? '' });
+    $('#form-dialog').close();
+    toast('Thanks! The admin will see it.');
+  } catch (err) {
+    submit.disabled = false;
+    fail(err, "Couldn't send that. If this keeps happening, the site owner may need to publish the updated database rules from the README.");
+  }
+}
+
+// Only admins listen for feedback (the rules only let them read it), and only while they are one.
+function syncFeedbackListener() {
+  if (adminOn && !state.unsubscribeFeedback) {
+    state.unsubscribeFeedback = state.store.subscribeFeedback(
+      (rows) => { state.feedback = rows; state.feedbackError = false; renderView(); renderAdmin(); },
+      (err) => { console.error(err); state.feedbackError = true; renderAdmin(); },
+    );
+  } else if (!adminOn && state.unsubscribeFeedback) {
+    state.unsubscribeFeedback();
+    state.unsubscribeFeedback = null;
+    state.feedback = [];
+  }
+}
+
+async function setFeedbackSeen(id, seen) {
+  try {
+    await state.store.markFeedback(id, seen);
+  } catch (err) {
+    fail(err, "Couldn't update that message. Please try again.");
+  }
+}
+
+function deleteFeedback(id) {
+  if (!adminOn) return;
+  askConfirm({
+    title: 'Delete this message?',
+    message: "It's removed for good.",
+    label: 'Delete',
+    failMessage: "Couldn't delete the message. Please try again.",
+  }, async () => {
+    await state.store.deleteFeedback(id);
+    toast('Message deleted');
+  });
+}
+
+const feedbackTime = (ms) => (ms ? new Date(ms).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'just now');
+
+function adminFeedback() {
+  if (state.feedbackError) return '<p class="muted">Feedback can\'t be loaded right now. (Site owner: publish the updated Firestore rules from the README.)</p>';
+  if (!state.feedback.length) return '<p class="muted">No messages yet. Anyone can send one with "Send feedback" at the bottom of the site.</p>';
+  return `<ul class="adm-list">${state.feedback.map((f) => `
+    <li class="adm-row${f.seen ? '' : ' is-new'}">
+      <div class="adm-main">
+        <span class="adm-sub">${f.seen ? '' : '<strong class="new-tag">New</strong> '}${esc(f.name || 'Someone')} · ${esc(feedbackTime(f.createdAt))}</span>
+        <p class="fb-text">${esc(f.message)}</p>
+      </div>
+      <div class="adm-actions">
+        <button type="button" class="btn btn--small" data-action="feedback-seen" data-id="${esc(f.id)}" data-seen="${f.seen ? '0' : '1'}">${f.seen ? 'Mark unread' : 'Mark read'}</button>
+        <button type="button" class="btn btn--small" data-action="feedback-delete" data-id="${esc(f.id)}">${icon('x', 2)} Delete</button>
+      </div>
+    </li>`).join('')}</ul>`;
+}
+
+// ---------------------------------------------------------------------------
+// admin: the group's game collection, tidying old days, restoring a backup
+// ---------------------------------------------------------------------------
+
+function adminCatalog() {
+  const catalog = sortCatalog(buildCatalog(state.players, state.sharedGames));
+  if (!catalog.length) return '<p class="muted">No games yet. They show up here as players add games to their collections, and when a game that nobody had listed gets played.</p>';
+  if (state.adminSelectedGame && !catalog.some((e) => e.key === state.adminSelectedGame)) state.adminSelectedGame = null;
+  return `
+    <p class="muted">Every game anyone has in their collection, plus games that were played although nobody had them listed ("someone has to own it"). Games nobody listed come first. Tap a game to see who has it, or to remove it from the group's collection.</p>
+    <ul class="adm-list">${catalog.map((e) => {
+    const open = e.key === state.adminSelectedGame;
+    const g = e.game;
+    return `
+      <li class="adm-player${open ? ' is-selected' : ''}">
+        <button type="button" class="adm-player-head" data-action="admin-select-game" data-key="${esc(e.key)}" aria-expanded="${open}">
+          <span class="adm-player-name">${esc(g.name)}${g.year ? ` <span class="muted">${g.year}</span>` : ''}</span>
+          <span class="adm-sub">${e.owners.length ? plural(e.owners.length, 'owner') : 'nobody listed it'}</span>
+          ${icon('chevron', 2)}
+        </button>
+        ${open ? `
+        <div class="adm-player-detail">
+          ${e.owners.length
+    ? `<div class="pill-row">${e.owners.map((id) => playerPill(id)).join('')}</div>`
+    : '<p class="muted">Nobody has it in a collection. It is here because it was played, and somebody has to own it.</p>'}
+          <div class="actions">
+            <a class="btn btn--small" href="${esc(g.id ? bggUrl(g.id) : bggSearchUrl(g.name))}" target="_blank" rel="noopener noreferrer">BoardGameGeek ${icon('arrow', 2)}</a>
+            <button type="button" class="btn btn--small btn--danger" data-action="admin-remove-catalog" data-key="${esc(e.key)}">${icon('x', 2)} Remove from the collection</button>
+          </div>
+        </div>` : ''}
+      </li>`;
+  }).join('')}</ul>`;
+}
+
+function adminRemoveCatalogGame(key) {
+  const entry = buildCatalog(state.players, state.sharedGames).find((e) => e.key === key);
+  if (!adminOn || !entry) return;
+  const updates = withoutGameFrom(state.players, key);
+  askConfirm({
+    title: `Remove ${entry.game.name}?`,
+    message: `${updates.length
+      ? `It comes out of the group's collection, and off ${listNames(updates.map((u) => u.playerId))}'s own ${updates.length === 1 ? 'list' : 'lists'}.`
+      : "It comes out of the group's collection."} Days and logged games that used it are not changed. (If it is played again, it comes back on the list.)`,
+    label: 'Remove',
+    failMessage: "Couldn't remove the game. Please try again.",
+  }, async () => {
+    await state.store.removeSharedGame(key, updates);
+    state.adminSelectedGame = null;
+    toast(`Removed ${entry.game.name}`);
+  });
+}
+
+// --- tidying old days ---
+
+const TIDY_PERIODS = [['1 month', 30], ['3 months', 90], ['6 months', 180], ['a year', 365]];
+
+function adminTidy() {
+  const old = state.oldDays;
+  const today = state.daysList[0]?.key;
+  const sorted = old ? [...old].sort() : [];
+  return `
+    <p>Every day that someone picked, voted on or suggested a game for stays in the database for good. Remove the old ones to keep it tidy: their availability, votes and game ideas go. Logged games, campaigns and players are never touched.</p>
+    <div class="adm-tools">
+      <button type="button" class="btn" data-action="tidy-check"${state.tidyBusy ? ' disabled' : ''}>${old ? 'Check again' : 'Check old days'}</button>
+      ${old ? `<span class="muted">${plural(old.length, 'day')} stored${sorted.length ? `, the oldest is ${esc(dateLabel(sorted[0]))}` : ''}.</span>` : ''}
+    </div>
+    ${old ? `<div class="adm-tools">${TIDY_PERIODS.map(([label, n]) => {
+    const keys = oldDayKeys(old, cutoffFor(today, n));
+    return `<button type="button" class="btn btn--small" data-action="tidy-remove" data-days="${n}"${keys.length && !state.tidyBusy ? '' : ' disabled'}>${icon('x', 2)} ${keys.length} older than ${label}</button>`;
+  }).join('')}</div>` : ''}
+    ${state.tidyNote ? `<p class="adm-status" role="status">${esc(state.tidyNote)}</p>` : ''}`;
+}
+
+async function tidyCheck() {
+  if (!adminOn || state.tidyBusy) return;
+  state.tidyBusy = true;
+  renderAdmin();
+  try {
+    state.oldDays = await state.store.listDayKeys();
+    state.tidyNote = '';
+  } catch (err) {
+    fail(err, "Couldn't look at the old days. Please try again.");
+  } finally {
+    state.tidyBusy = false;
+    renderAdmin();
+  }
+}
+
+function tidyRemove(days) {
+  const label = (TIDY_PERIODS.find(([, n]) => n === days) ?? [`${days} days`])[0];
+  const keys = oldDayKeys(state.oldDays ?? [], cutoffFor(state.daysList[0].key, days));
+  if (!adminOn || !keys.length) return;
+  askConfirm({
+    title: `Remove ${plural(keys.length, 'old day')}?`,
+    message: `Days older than ${label} (${dateLabel(keys[0])} to ${dateLabel(keys.at(-1))}) lose their availability, votes and game ideas. Logged games and campaigns stay. This can't be undone, so download a backup first if you aren't sure.`,
+    label: 'Remove',
+    failMessage: "Couldn't remove the days. Please try again.",
+  }, async () => {
+    await state.store.deleteDays(keys);
+    state.oldDays = await state.store.listDayKeys();
+    state.tidyNote = `Removed ${plural(keys.length, 'day')}.`;
+    renderAdmin();                                   // the counts on the buttons changed
+    toast('Old days removed');
+  });
+}
+
+// --- restoring a backup ---
+
+function restorePreview(r) {
+  if (!r.backup) return `<div class="error" role="alert"><strong>${esc(r.name)}</strong><br>${esc(r.error)}</div>`;
+  const c = r.summary.counts;
+  const made = r.summary.exportedAt ? feedbackTime(Date.parse(r.summary.exportedAt)) : 'at an unknown time';
+  return `
+    <div class="adm-status" role="status">
+      <strong>${esc(r.name)}</strong><br>Made ${esc(made)}. It holds ${plural(c.players, 'player')}, ${plural(c.days, 'day')}, ${plural(c.plays, 'logged game')}, ${plural(c.campaigns, 'campaign')} and ${plural(c.sharedGames, 'shared game')}.
+    </div>
+    <p class="muted">Restoring adds all of that back and overwrites anything with the same name (a player, a day, a logged game, a campaign). It never deletes anything, but newer changes to those same entries are replaced by what the file says.</p>
+    ${r.error ? `<p class="error" role="alert">${esc(r.error)}</p>` : ''}
+    ${r.note ? `<p class="adm-status" role="status">${esc(r.note)}</p>` : ''}
+    <div class="adm-tools">
+      <button type="button" class="btn" data-action="restore-cancel"${r.busy ? ' disabled' : ''}>Cancel</button>
+      <button type="button" class="btn btn--solid" data-action="restore-go"${r.busy ? ' disabled' : ''}>${icon('upload', 2)} ${r.busy ? 'Restoring…' : 'Restore this backup'}</button>
+    </div>`;
+}
+
+async function chooseRestoreFile(input) {
+  const file = input.files?.[0];
+  input.value = '';                      // so choosing the same file again works
+  if (!adminOn || !file) return;
+  if (file.size > 20 * 1024 * 1024) {
+    state.restore = { name: file.name, error: 'That file is too big to be a backup (over 20 MB).' };
+    renderAdmin();
+    return;
+  }
+  let text;
+  try {
+    text = await file.text();
+  } catch {
+    state.restore = { name: file.name, error: "That file couldn't be read." };
+    renderAdmin();
+    return;
+  }
+  const parsed = parseBackup(text);
+  state.restore = parsed.error ? { name: file.name, error: parsed.error } : { name: file.name, backup: parsed.backup, summary: parsed.summary };
+  renderAdmin();
+}
+
+async function runRestore() {
+  const r = state.restore;
+  if (!adminOn || !r?.backup || r.busy) return;
+  const ops = restoreOps(r.backup);
+  r.busy = true;
+  r.error = '';
+  r.note = `Restoring… 0 of ${ops.length}`;
+  renderAdmin();
+  try {
+    await state.store.restoreAll(ops, (done, total) => { r.note = `Restoring… ${done} of ${total}`; renderAdmin(); });
+    state.backupNote = `Restored ${ops.length} ${ops.length === 1 ? 'entry' : 'entries'} from ${r.name}.`;
+    state.restore = null;
+    toast('Backup restored');
+  } catch (err) {
+    r.busy = false;
+    r.note = '';
+    r.error = 'Not everything could be restored. Some of it may have been written already; restoring the same file again is safe.';
+    fail(err, "Couldn't restore the backup. If this keeps happening, the site owner may need to publish the updated database rules from the README.");
+  }
+  renderAdmin();
 }
 
 // ---------------------------------------------------------------------------
@@ -2553,6 +2960,7 @@ function onAdmin(admin) {
   // The Admin page appears for an admin who opened it directly, and goes away if admin rights do.
   if (!adminOn && location.hash === '#admin' && !admin.checking) location.hash = '#calendar';
   state.view = viewFromHash();
+  syncFeedbackListener();
   const dialog = $('#admin-dialog');
   if (state.adminAsked && admin.signedIn && !admin.checking) {
     state.adminAsked = false;
@@ -2632,7 +3040,7 @@ const actions = {
     state.folds[id] = !isOpen(id, el.dataset.default !== '0');
     ls.set(FOLDS_KEY, JSON.stringify(state.folds));
     renderLastWeek();
-    renderPlayers();
+    renderPlayersPage();
     renderCampaigns();
     renderHall();
     renderAdmin();
@@ -2716,6 +3124,21 @@ const actions = {
   },
   'admin-plays-toggle': () => { state.adminAllPlays = !state.adminAllPlays; renderAdmin(); },
   'admin-backup': downloadBackup,
+  'admin-select-game': (el) => {
+    state.adminSelectedGame = state.adminSelectedGame === el.dataset.key ? null : el.dataset.key;
+    renderAdmin();
+    document.querySelector(`[data-action="admin-select-game"][data-key="${CSS.escape(el.dataset.key)}"]`)?.focus();
+  },
+  'admin-remove-catalog': (el) => adminRemoveCatalogGame(el.dataset.key),
+  'tidy-check': tidyCheck,
+  'tidy-remove': (el) => tidyRemove(Number(el.dataset.days)),
+  'restore-cancel': () => { state.restore = null; renderAdmin(); },
+  'restore-go': runRestore,
+  'feedback-seen': (el) => setFeedbackSeen(el.dataset.id, el.dataset.seen === '1'),
+  'feedback-delete': (el) => deleteFeedback(el.dataset.id),
+  feedback: openFeedback,
+  'campaign-notes': (el) => openNotes(el.dataset.id),
+  'no-owner': (el) => toast(`Nobody has ${el.dataset.name} in their collection yet. If you own it, add it to yours in your profile.`),
   'play-add': () => openPlayEditor(null),
   'play-edit': (el) => openPlayEditor(el.dataset.id),
   'ph-pick-game': (el) => {
@@ -2766,6 +3189,7 @@ document.addEventListener('input', (e) => {
   if (e.target.id === 'mg-q') renderMyResults();
   if (e.target.id === 'coll-q') renderCollection();
   if (e.target.id === 'ph-q') renderPhResults();
+  if (e.target.id === 'pl-q') { state.playersFilter = e.target.value; renderPlayersPage(); }
 });
 
 document.addEventListener('change', (e) => {
@@ -2774,6 +3198,7 @@ document.addEventListener('change', (e) => {
     renderLogNext();
   }
   if (e.target.id === 'log-next' && state.log) state.log.next = e.target.value;
+  if (e.target.id === 'restore-file') chooseRestoreFile(e.target);
 });
 
 document.addEventListener('submit', (e) => {
@@ -2784,6 +3209,8 @@ document.addEventListener('submit', (e) => {
   if (e.target.id === 'log-form') submitLog(e.target);
   if (e.target.id === 'campaign-form') submitStartCampaign(e.target);
   if (e.target.id === 'ph-form') submitPlayEdit(e.target);
+  if (e.target.id === 'notes-form') submitNotes(e.target);
+  if (e.target.id === 'feedback-form') submitFeedback(e.target);
 });
 
 $('#day-dialog').addEventListener('close', () => { state.openKey = null; });
@@ -2844,6 +3271,8 @@ function subscribe() {
       state.playsReady = true;
       state.playsError = false;
       renderHall();
+      renderPlayersPage();
+      renderAdmin();
     },
     (err) => {
       console.error(err);
@@ -2864,6 +3293,23 @@ function subscribe() {
       console.error(err);
       state.campaignsError = true;
       renderCampaigns();
+    },
+  );
+
+  // Games that were played though nobody had them listed: part of the group's collection, which is
+  // what the "!" next to a game name is worked out from. Its own listener, like the others.
+  state.unsubscribeShared?.();
+  state.unsubscribeShared = state.store.subscribeSharedGames(
+    (games) => {
+      state.sharedGames = games;
+      state.sharedReady = true;
+      state.sharedError = false;
+      renderAll();
+    },
+    (err) => {
+      console.error(err);
+      state.sharedError = true;
+      renderAll();
     },
   );
 }
