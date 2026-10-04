@@ -1,87 +1,30 @@
-// Tiny 1-bit pixel icons. Each icon is a bitmap; "#" is a lit pixel.
-// They draw in `currentColor`, so they invert along with their surroundings.
+// Smooth vector icons on a 24x24 grid. They draw in `currentColor`, so they invert
+// along with whatever they sit on. (The player avatars are separate, and stay pixel art.)
 
-const BITMAPS = {
-  check: [
-    '......##',
-    '.....##.',
-    '##..##..',
-    '.####...',
-    '..##....',
-  ],
-  plus: [
-    '...##...',
-    '...##...',
-    '...##...',
-    '########',
-    '########',
-    '...##...',
-    '...##...',
-    '...##...',
-  ],
-  x: [
-    '##....##',
-    '###..###',
-    '.######.',
-    '..####..',
-    '..####..',
-    '.######.',
-    '###..###',
-    '##....##',
-  ],
-  star: [
-    '....#....',
-    '....#....',
-    '...###...',
-    '#########',
-    '.#######.',
-    '..#####..',
-    '.###.###.',
-    '.##...##.',
-  ],
-  arrow: [
-    '....###',
-    '.....##',
-    '....###',
-    '...##..',
-    '..##...',
-    '.##....',
-    '##.....',
-  ],
-  dice: [
-    '#######',
-    '#.....#',
-    '#.#.#.#',
-    '#..#..#',
-    '#.#.#.#',
-    '#.....#',
-    '#######',
-  ],
-  meeple: [
-    '....###....',
-    '...#####...',
-    '...#####...',
-    '....###....',
-    '..#######..',
-    '###########',
-    '###########',
-    '.#########.',
-    '..#######..',
-    '.####.####.',
-    '.###...###.',
-  ],
+const LINE = 'fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"';
+
+// One half of the meeple; the other half is the same shape mirrored.
+const MEEPLE_HALF = 'M12 8.8H9.8C7.8 9.4 6.6 10.3 4.8 10.6C3.2 10.9 2.6 11.6 2.6 12.6C2.6 13.8 3.8 14.3 5.4 14.3'
+  + 'C6.8 14.3 7.6 14.4 7.9 15C8.3 15.9 7.4 17.4 6.4 19C5.8 20 6 21 7.2 21H10.6C11.4 21 11.7 20.4 12 19.4Z';
+
+const ICONS = {
+  check: `<path ${LINE} d="M4.5 12.5l5 5 10-11"/>`,
+  plus: `<path ${LINE} d="M12 4.5v15M4.5 12h15"/>`,
+  x: `<path ${LINE} d="M6 6l12 12M18 6L6 18"/>`,
+  arrow: `<path ${LINE} d="M7 17L17 7M9 7h8v8"/>`,
+  star: '<path fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" '
+    + 'd="M12 2.8l2.8 5.9 6.4.9-4.7 4.5 1.2 6.4L12 17.4l-5.7 3.1 1.2-6.4-4.7-4.5 6.4-.9z"/>',
+  dice: `<rect ${LINE} stroke-width="2.4" x="3.5" y="3.5" width="17" height="17" rx="4"/>`
+    + '<g fill="currentColor"><circle cx="8.3" cy="8.3" r="1.5"/><circle cx="15.7" cy="8.3" r="1.5"/>'
+    + '<circle cx="12" cy="12" r="1.5"/><circle cx="8.3" cy="15.7" r="1.5"/><circle cx="15.7" cy="15.7" r="1.5"/></g>',
+  meeple: `<g fill="currentColor"><circle cx="12" cy="5.4" r="3.2"/><path d="${MEEPLE_HALF}"/>`
+    + `<path transform="matrix(-1 0 0 1 24 0)" d="${MEEPLE_HALF}"/></g>`,
 };
 
-export function iconPath(name) {
-  const rows = BITMAPS[name];
-  let d = '';
-  rows.forEach((row, y) => {
-    for (const run of row.matchAll(/#+/g)) d += `M${run.index} ${y}h${run[0].length}v1h-${run[0].length}z`;
-  });
-  return { d, w: rows[0].length, h: rows.length };
-}
+export const iconInner = (name) => ICONS[name];
 
+// `scale` is a size multiplier: 2 gives an 18px icon, 3 gives 27px.
 export function icon(name, scale = 2) {
-  const { d, w, h } = iconPath(name);
-  return `<svg class="px" viewBox="0 0 ${w} ${h}" width="${w * scale}" height="${h * scale}" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><path fill="currentColor" d="${d}"/></svg>`;
+  const size = scale * 9;
+  return `<svg class="ico" viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true" focusable="false">${ICONS[name]}</svg>`;
 }

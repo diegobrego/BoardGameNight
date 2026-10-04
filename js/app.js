@@ -1,7 +1,7 @@
 import { MIN_PLAYERS, DAYS_AHEAD } from './config.js';
 import { createStore, isForcedDemo } from './store.js';
 import { avatar, randomSeed } from './avatar.js';
-import { icon, iconPath } from './icons.js';
+import { icon, iconInner } from './icons.js';
 import { upcomingDays, longLabel, rangeLabel } from './dates.js';
 import {
   loadGames, isLoaded, findGame, searchGames, bggUrl, bggSearchUrl, parseBggLink, titleFromSlug,
@@ -99,9 +99,8 @@ function showBanner(html) {
 
 function renderStatic() {
   $('#brand-icon').innerHTML = icon('meeple', 3);
-  const { d, w, h } = iconPath('meeple');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 ${w + 2} ${h + 2}"><rect x="-1" y="-1" width="${w + 2}" height="${h + 2}" rx="2" fill="#000"/><path fill="#fff" d="${d}"/></svg>`;
-  $('#favicon').href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  const favicon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" rx="5" fill="#000"/><g color="#fff" transform="translate(2.4 2.4) scale(.8)">${iconInner('meeple')}</g></svg>`;
+  $('#favicon').href = `data:image/svg+xml,${encodeURIComponent(favicon)}`;
   $('#legend').innerHTML = `
     <li><span class="swatch swatch--mine"></span>You're free</li>
     <li><span class="swatch swatch--go"></span>${MIN_PLAYERS}+ free: game on</li>

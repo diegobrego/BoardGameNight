@@ -2,7 +2,7 @@
 
 A tiny website for a board game group. Everyone picks the days they're free over the next two weeks, days with 3+ free players light up green, and on those days the group can pile up game options with links to BoardGameGeek.
 
-Plain HTML/CSS/JS, no build step, hosted for free on GitHub Pages. Look: 1-bit Playdate style, black and white, with green as the one signal colour.
+Plain HTML/CSS/JS, no build step, hosted for free on GitHub Pages. Look: black and white with a Playdate feel (dither patterns, hard shadows, pixel-art player faces), a rounded easy-to-read font and crisp vector icons, with green as the one signal colour.
 
 ## Try it on your computer
 
@@ -75,6 +75,7 @@ In admin mode you get an **Admin** tag and an **X** next to everyone in "The cre
 | --- | --- |
 | Players needed for a "game on" day, number of days shown | [`js/config.js`](js/config.js) (`MIN_PLAYERS`, `DAYS_AHEAD`) |
 | The green (set `--go` to `#000` for pure black and white) | top of [`css/style.css`](css/style.css) |
+| The font (currently [M PLUS Rounded 1c](https://fonts.google.com/specimen/M+PLUS+Rounded+1c)) | `--font` in [`css/style.css`](css/style.css) and the Google Fonts `<link>` in [`index.html`](index.html) |
 
 ## Files
 
@@ -86,6 +87,7 @@ js/store-firebase.js  shared backend (Firestore)
 js/store-local.js     demo backend (this browser only)
 js/games.js           game search + BGG links
 js/avatar.js          pixel faces
+js/icons.js           vector icons
 data/games.json       BGG game index
 tools/                local server, game-index builder
 firestore.rules       database rules to paste into Firebase
