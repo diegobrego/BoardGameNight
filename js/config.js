@@ -25,7 +25,7 @@ export const MIN_PLAYERS = 3;
 export const MIN_PLAYERS_FOR_IDEAS = 1;
 
 // How many days the calendar shows, starting today.
-export const DAYS_AHEAD = 14;
+export const DAYS_AHEAD = 21;
 
 // How many days before today stay available in the "Last week" preview, so a game night that
 // nobody logged on the day can still be logged.
