@@ -120,7 +120,7 @@ body {
   background-size: 4px 4px;
 }
 
-body.has-savebar { padding-bottom: 84px; }
+body.has-savebar { padding-bottom: 132px; }
 
 [hidden] { display: none !important; }
 
@@ -439,6 +439,12 @@ a.btn { text-decoration: none; }
 .savebar[hidden] { display: none; }
 .savebar-text { flex: 1; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; font-size: 15px; }
 
+/* "Start time for new days": the time the days being added get (a player's own start time, see .my-time).
+   It takes the first line of the bar; the count and the buttons share the second. */
+.savebar { flex-wrap: wrap; }
+.savebar-time { flex: 1 0 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 14px; font-weight: 700; }
+.savebar-time input[type="time"] { flex: none; width: 9.5em; padding: 4px 10px; }
+
 /* ---------------------------------------------------------------- dialog */
 
 .sheet {
@@ -476,6 +482,13 @@ a.btn { text-decoration: none; }
   border: var(--bw) solid var(--line); border-radius: 11px;
 }
 .people em { font-style: normal; opacity: .6; }
+/* who is available with "Show times": the time each can start from, under the name */
+.pill-text { display: grid; line-height: 1.2; }
+.pill-time { font-size: 13px; font-weight: 600; opacity: .8; }
+.times-sum { margin: 0; }
+/* the player's own start time on a day */
+.my-time { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+.my-time input[type="time"] { flex: none; width: 9.5em; padding: 5px 10px; }
 .block > .btn { justify-self: start; }
 
 .head-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }

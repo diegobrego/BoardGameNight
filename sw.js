@@ -9,7 +9,7 @@
 // minutes old after a new version went out. `cache: 'no-cache'` revalidates every time (a tiny
 // "has it changed?" request that usually answers 304), so a reload always gets the latest.
 
-const CACHE = 'bgn-shell-v3';
+const CACHE = 'bgn-shell-v4';
 
 const SHELL = [
   './',
@@ -34,6 +34,7 @@ const SHELL = [
   'js/ics.js',
   'js/mygames.js',
   'js/special.js',
+  'js/times.js',
   'icons/icon-192.png',
 ];
 

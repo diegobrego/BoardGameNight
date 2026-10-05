@@ -2,6 +2,7 @@
 // Data layout:
 //   players/{id}        { name, avatar, games?: [{ id, name, year }] }   (games: their favourites / owned list)
 //   days/{YYYY-MM-DD}   { players: [playerId, ...], games: [{ id, name, year, by }, ...],
+//                         times:  { [playerId]: "19:30" }   (the time each can start from; none = 17:00)
 //                         votes:  { [voteKey]: [playerId, ...] },
 //                         brings: { [voteKey]: [playerId, ...] },
 //                         details: { place, time } }
@@ -67,7 +68,7 @@ export function create(config) {
       const offDays = onSnapshot(range, (snap) => {
         days = {};
         snap.forEach((d) => {
-          days[d.id] = { players: [], games: [], votes: {}, brings: {}, details: {}, ...d.data() };
+          days[d.id] = { players: [], games: [], votes: {}, brings: {}, details: {}, times: {}, ...d.data() };
         });
         daysSynced = !snap.metadata.fromCache;
         emit();
@@ -86,12 +87,25 @@ export function create(config) {
     // A player's list of favourite / owned games: [{ id, name, year }], saved as a whole.
     setPlayerGames: (id, games) => updateDoc(doc(playersCol, id), { games }),
 
-    async setAvailability(playerId, add, remove) {
+    // A day that is added gets the time the player can start from ('' = none, which counts as 17:00); a day that is removed
+    // takes it away again.
+    async setAvailability(playerId, add, remove, time = '') {
       const batch = writeBatch(db);
-      for (const k of add) batch.set(doc(daysCol, k), { players: arrayUnion(playerId) }, { merge: true });
-      for (const k of remove) batch.set(doc(daysCol, k), { players: arrayRemove(playerId) }, { merge: true });
+      for (const k of add) {
+        batch.set(doc(daysCol, k), { players: arrayUnion(playerId), times: { [playerId]: time || deleteField() } }, { merge: true });
+      }
+      for (const k of remove) {
+        batch.set(doc(daysCol, k), { players: arrayRemove(playerId), times: { [playerId]: deleteField() } }, { merge: true });
+      }
       await batch.commit();
     },
+
+    // One player's start time on one day ('' = none, which counts as 17:00).
+    setAvailTime: (date, playerId, time) => setDoc(
+      doc(daysCol, date),
+      { times: { [playerId]: time || deleteField() } },
+      { merge: true },
+    ),
 
     addGame: (date, game) => setDoc(doc(daysCol, date), { games: arrayUnion(game) }, { merge: true }),
 
@@ -213,7 +227,7 @@ export function create(config) {
       for (const [i, chunk] of chunks.entries()) {
         const batch = writeBatch(db);
         if (i === 0) batch.delete(doc(playersCol, id));
-        for (const ref of chunk) batch.set(ref, { players: arrayRemove(id) }, { merge: true });
+        for (const ref of chunk) batch.set(ref, { players: arrayRemove(id), times: { [id]: deleteField() } }, { merge: true });
         await batch.commit();
       }
     },

@@ -89,17 +89,20 @@ service cloud.firestore {
     // One document per calendar day, named like "2026-10-09".
     //   votes   maps a game to the players who voted for it
     //   brings  maps a game to the players who will bring it
+    //   times   maps a player to the time they can start from ("19:30"); no entry means 17:00
     //   details is the game night's { place, time } (time as "19:30", or empty)
     match /days/{day} {
       allow read: if true;
       allow create, update: if day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-                            && request.resource.data.keys().hasOnly(['players', 'games', 'votes', 'brings', 'details'])
+                            && request.resource.data.keys().hasOnly(['players', 'games', 'votes', 'brings', 'details', 'times'])
                             && request.resource.data.get('players', []).size() <= 50
                             && request.resource.data.get('games', []).size() <= 50
                             && request.resource.data.get('votes', {}) is map
                             && request.resource.data.get('votes', {}).size() <= 50
                             && request.resource.data.get('brings', {}) is map
                             && request.resource.data.get('brings', {}).size() <= 50
+                            && request.resource.data.get('times', {}) is map
+                            && request.resource.data.get('times', {}).size() <= 50
                             && request.resource.data.get('details', {}) is map
                             && request.resource.data.get('details', {}).get('place', '').size() <= 120
                             && request.resource.data.get('details', {}).get('time', '').matches('^(([01][0-9]|2[0-3]):[0-5][0-9])?$');
@@ -203,7 +206,8 @@ service cloud.firestore {
                     && request.resource.data.note.size() <= 50;
       allow delete: if isAdmin();
     }
-$1 a message, only an admin can read, mark
+
+    // Feedback from the "Send feedback" link: anyone can send a message, only an admin can read, mark
     // as read, or delete them.
     match /feedback/{id} {
       allow read: if isAdmin();

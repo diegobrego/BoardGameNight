@@ -3,12 +3,13 @@
 //   subscribe(onData, { from, to }, onError) -> unsubscribe
 //       onData({ players, days, synced }) fires on every change.
 //         players: { [id]: { id, name, avatar, games?: [{ id, name, year }] } }
-//         days:    { [YYYY-MM-DD]: { players: [id], games: [{ id, name, year, by }] } }
+//         days:    { [YYYY-MM-DD]: { players: [id], times: { [id]: "19:30" }, games: [{ id, name, year, by }] } }
 //         synced:  false while the data may only be a local cache
 //   addPlayer({ name, avatar })          -> id
 //   updatePlayer(id, { name, avatar })
 //   setPlayerGames(id, [{ id, name, year }])    the player's favourite / owned games, saved as a whole
-//   setAvailability(playerId, addDates, removeDates)
+//   setAvailability(playerId, addDates, removeDates, time)   `time` ("19:30"; '' = none, counted as 17:00) goes with the days added
+//   setAvailTime(date, playerId, time)              the time one player can start from on one day ("" = none, counted as 17:00)
 //   addGame(date, game) / removeGame(date, game)   (removing a game also drops its votes)
 //   toggleVote(date, voteKey, playerId, on)         days[date].votes: { [voteKey]: [playerId] }
 //   toggleBring(date, voteKey, playerId, on)        days[date].brings: { [voteKey]: [playerId] }

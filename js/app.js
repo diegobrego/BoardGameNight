@@ -1,4 +1,4 @@
-import { MIN_PLAYERS, MIN_PLAYERS_FOR_IDEAS, DAYS_AHEAD, DAYS_BEHIND, SITE_URL } from './config.js';
+import { MIN_PLAYERS, MIN_PLAYERS_FOR_IDEAS, DAYS_AHEAD, DAYS_BEHIND, SITE_URL, DEFAULT_PLACE } from './config.js';
 import { createStore, isForcedDemo } from './store.js';
 import { avatar, randomSeed, hueOf } from './avatar.js';
 import { icon, iconInner } from './icons.js';
@@ -10,6 +10,7 @@ import { MAX_MY_GAMES, hasGame, withGame, withoutGame, toggleFav, ordered, match
 import { buildBackup, backupName, buildPlay, withoutUndefined, parseBackup, restoreOps, cutoffFor, oldDayKeys } from './admin.js';
 import { buildCatalog, ownedKeys, nobodyOwns, sortCatalog, withoutGameFrom } from './collection.js';
 import { buildSpecialDay, specialMap, splitSpecialDays, holidaysBetween, NOTE_MAX, AHEAD_DAYS } from './special.js';
+import { DEFAULT_START, isTime, startTimesOf, latestStart } from './times.js';
 import {
   loadGames, isLoaded, findGame, searchGames, bggUrl, bggSearchUrl, parseBggLink, titleFromSlug, voteKey,
 } from './games.js';
@@ -79,6 +80,14 @@ function loadFolds() {
 }
 const isOpen = (id, openByDefault = true) => state.folds[id] ?? openByDefault;
 
+// The time this device last said it can start from (DEFAULT_START until then). It goes with the days the
+// player adds next, so someone who is always free from 20:00 doesn't have to say so every time.
+const FROM_KEY = 'bgn.from';
+function loadFrom() {
+  const saved = ls.get(FROM_KEY);
+  return isTime(saved) ? saved : DEFAULT_START;
+}
+
 // Whether this visitor is an admin: kept apart from `state` so it can be used while `state` is
 // still being built. The Admin page only exists for admins; anyone else asking for it gets the calendar.
 let adminOn = false;
@@ -144,6 +153,7 @@ const state = {
   askedWho: false,
   who: { mode: 'choose', cands: [], sel: 0 },
   gamesFailed: false,
+  from: loadFrom(),          // the time this device can start from, for the days it adds
 };
 
 const sortedPlayers = () => Object.values(state.players).sort((a, b) => a.name.localeCompare(b.name));
@@ -167,6 +177,13 @@ function peopleOn(key) {
 }
 
 const changeCount = () => state.daysList.filter((d) => state.draft.has(d.key) !== savedMine(d.key)).length;
+
+// A time field left empty means the default.
+const rememberFrom = (time) => { state.from = isTime(time) ? time : DEFAULT_START; ls.set(FROM_KEY, state.from); };
+
+// When everyone on a day who named a start time can be there: the latest of them (see times.js).
+const startOn = (key) => startTimesOf(state.days[key]?.times, savedIds(key));
+const latestOn = (key) => latestStart(state.days[key]?.times, savedIds(key));
 
 // Any day we show: the next two weeks, or last week.
 const dayByKey = (key) => state.daysList.find((d) => d.key === key) ?? state.pastDays.find((d) => d.key === key);
@@ -228,6 +245,8 @@ function whatsappText(kind, day) {
     ? [`⏰ Game night ${day.isToday ? 'today' : 'tomorrow'}! (${when})`, `In: ${listNames(ids, 99)}`]
     : [`🎲 Game night on ${when}?`, `Available so far: ${listNames(ids, 99)}`];
   if (where) lines.push(`📍 ${where}`);
+  const latest = latestOn(day.key).time;                // no start time set yet: say when everyone is free from
+  if (latest && !state.days[day.key]?.details?.time) lines.push(`🕗 Everyone is free from ${latest}`);
   if (pick) lines.push(pick);
   lines.push(kind === 'remind' ? `Details and votes: ${SITE_URL}` : `Pick your days and vote: ${SITE_URL}`);
   return lines.join('\n');
@@ -335,6 +354,7 @@ function renderToolbar() {
   if (picking) {
     const n = changeCount();
     bar.innerHTML = `
+      <label class="savebar-time"><span>Start time for new days</span><input id="pick-time" type="time" value="${state.from}"${state.saving ? ' disabled' : ''}></label>
       <span class="savebar-text">${n ? plural(n, 'change') : 'No changes yet'}</span>
       <button type="button" class="btn" data-action="cancel-pick"${state.saving ? ' disabled' : ''}>Cancel</button>
       <button type="button" class="btn btn--solid" data-action="save-pick"${n && !state.saving ? '' : ' disabled'}>${state.saving ? 'Saving…' : 'Save'}</button>`;
@@ -733,7 +753,7 @@ async function savePick() {
   state.saving = true;
   renderToolbar();
   try {
-    await state.store.setAvailability(state.me, add, remove);
+    await state.store.setAvailability(state.me, add, remove, state.from);   // the days added get the chosen start time
     state.mode = 'view';
     toast('Saved!');
   } catch (err) {
@@ -807,11 +827,22 @@ function renderDayPanel() {
       ${note !== undefined ? `<button type="button" class="btn btn--small btn--danger" data-action="special-remove" data-date="${esc(key)}">${icon('x', 2)} Remove</button>` : ''}
     </div>` : ''}`;
 
+  // Who is available. "Show times" adds the time each can start from; the player's own time is always there to change.
+  const timesOpen = isOpen('dp-times', false);
+  const starts = Object.fromEntries(startOn(key).map((t) => [t.id, t.time]));
+  const latest = latestOn(key);
   $('#dp-who').innerHTML = `
-    <h3 class="h-small">Who's available <span class="count">${ids.length}</span></h3>
+    <div class="head-row">
+      <h3 class="h-small">Who's available <span class="count">${ids.length}</span></h3>
+      ${ids.length ? `<button type="button" class="btn btn--small" data-action="toggle-fold" data-fold="dp-times" data-default="0" aria-expanded="${timesOpen}">${icon('clock', 2)} ${timesOpen ? 'Hide times' : 'Show times'}</button>` : ''}
+    </div>
     ${ids.length
-    ? `<ul class="people">${ids.map((id) => `<li style="--h:${hueOf(state.players[id].avatar)}"><button type="button" class="pill-btn" data-action="player-card" data-id="${esc(id)}" title="Show ${esc(state.players[id].name)}'s card">${avatar(state.players[id].avatar, 32)}<span>${esc(state.players[id].name)}${id === state.me ? ' <em>(you)</em>' : ''}</span></button></li>`).join('')}</ul>`
+    ? `<ul class="people">${ids.map((id) => `<li style="--h:${hueOf(state.players[id].avatar)}"><button type="button" class="pill-btn" data-action="player-card" data-id="${esc(id)}" title="Show ${esc(state.players[id].name)}'s card">${avatar(state.players[id].avatar, 32)}<span class="pill-text"><span>${esc(state.players[id].name)}${id === state.me ? ' <em>(you)</em>' : ''}</span>${timesOpen ? `<span class="pill-time">from ${starts[id]}</span>` : ''}</span></button></li>`).join('')}</ul>`
     : `<p class="muted">${past ? 'Nobody was available.' : 'Nobody yet.'}</p>`}
+    ${timesOpen && ids.length ? `<p class="muted times-sum">${latest.ids.length === ids.length
+    ? `Everyone can start from <strong>${latest.time}</strong>.`
+    : `Everyone can be there from <strong>${latest.time}</strong> (${esc(listNames(latest.ids, 3))} ${latest.ids.length === 1 ? 'is' : 'are'} the latest).`}</p>` : ''}
+    ${canAct ? `<label class="my-time"><span>I can start from</span><input id="my-time" type="time" value="${starts[state.me] ?? DEFAULT_START}"></label>` : ''}
     ${past ? '' : `<button type="button" class="btn${mine ? '' : ' btn--solid'}" data-action="toggle-me">${mine ? "I can't make it" : "I'm available this day"}</button>`}
     ${state.admin.isAdmin && go && !past ? whatsappButton(day) : ''}`;
 
@@ -866,7 +897,7 @@ function renderDayPanel() {
       </div>
       ${hasDetails
     ? `<ul class="details">${place ? `<li>${icon('pin', 2)}<span>${esc(place)}</span></li>` : ''}${time ? `<li>${icon('clock', 2)}<span>${esc(time)}</span></li>` : ''}</ul>`
-    : '<p class="muted">No location yet.</p>'}` : ''}
+    : ''}` : ''}
     ${loggedHere.length ? `
       <div>
         <h3 class="h-small">Logged</h3>
@@ -986,10 +1017,33 @@ async function toggleMe() {
   if (dayByKey(key)?.isPast) return toast('That day has passed.');
   const mine = savedMine(key);
   try {
-    await state.store.setAvailability(state.me, mine ? [] : [key], mine ? [key] : []);
-    toast(mine ? 'Removed you from this day' : "You're in!");
+    await state.store.setAvailability(state.me, mine ? [] : [key], mine ? [key] : [], state.from);
+    toast(mine ? 'Removed you from this day' : `You're in, from ${state.from}!`);
   } catch (err) {
     fail(err);
+  }
+}
+
+// The time field of "I can start from" reports a change for every part of the time that is typed, so wait
+// until the typing stops before saving.
+let myTimeTimer;
+function queueMyTime(input) {
+  const key = state.openKey;
+  clearTimeout(myTimeTimer);
+  myTimeTimer = setTimeout(() => setMyTime(key, input.value), 700);
+}
+
+// The time the player can start from on one day (an empty field means the default). It only changes this day:
+// the time for the days they add next is the one in the Pick my days bar.
+async function setMyTime(key, value) {
+  if (!state.me || !key || dayByKey(key)?.isPast || !savedMine(key)) return;
+  const time = isTime(value) ? value : DEFAULT_START;
+  try {
+    await state.store.setAvailTime(key, state.me, time);
+    toast(`You can start from ${time}`);
+  } catch (err) {
+    fail(err, "Couldn't save your time. Please try again.");
+    renderDayPanel();                  // back to what is saved
   }
 }
 
@@ -1299,16 +1353,23 @@ function openDetails() {
   if (!state.me) return openWho('choose');
   const key = state.openKey;
   if (dayByKey(key)?.isPast) return toast('That day has passed.');
-  const { place = '', time = '' } = state.days[key]?.details ?? {};
+  const details = state.days[key]?.details ?? {};
+  const { place = '', time = '' } = details;
+  // Nothing saved for this day yet: start with the usual place and the latest time anyone can start.
+  // (A place that was saved empty stays empty.)
+  const usualPlace = details.place === undefined;
+  const suggested = time ? '' : latestOn(key).time;
+  const filled = [usualPlace && `the usual place (${DEFAULT_PLACE})`, suggested && `the latest time anyone can start (${suggested})`].filter(Boolean);
   $('#details-dialog').innerHTML = `
     <div class="sheet-head"><h2>Game night details</h2>${closeBtn()}</div>
     <form id="details-form" class="sheet-body" data-date="${esc(key)}" autocomplete="off">
       <label class="field"><span>Where</span>
-        <input name="place" maxlength="80" placeholder="e.g. Mia's place, Main Street 5" value="${esc(place)}">
+        <input name="place" maxlength="80" placeholder="e.g. Mia's place, Main Street 5" value="${esc(usualPlace ? DEFAULT_PLACE : place)}">
       </label>
       <label class="field"><span>Start time (optional)</span>
-        <input name="time" type="time" value="${esc(time)}">
+        <input name="time" type="time" value="${esc(time || suggested)}">
       </label>
+      ${filled.length ? `<p class="muted">Filled in with ${esc(filled.join(' and '))}. Change ${filled.length > 1 ? 'them' : 'it'} if you agree on something else, for example on WhatsApp.</p>` : ''}
       <p class="muted">Everyone can see this. It goes into the reminder and the calendar event.</p>
       <div class="row">
         <button type="button" class="btn" data-action="close-dialog">Cancel</button>
@@ -3381,6 +3442,8 @@ document.addEventListener('change', (e) => {
   }
   if (e.target.id === 'log-next' && state.log) state.log.next = e.target.value;
   if (e.target.id === 'restore-file') chooseRestoreFile(e.target);
+  if (e.target.id === 'pick-time') rememberFrom(e.target.value);
+  if (e.target.id === 'my-time') queueMyTime(e.target);
   if (e.target.id === 'sp-date') updateSpecialHint();
 });
 

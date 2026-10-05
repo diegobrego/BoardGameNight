@@ -29,6 +29,7 @@ function seed() {
     // tomorrow: enough players, so the reminder banner shows
     [keys[1]]: {
       players: ['demo0', 'demo1', 'demo2'],
+      times: { demo0: '19:00', demo1: '19:30' },
       games: [],
       details: { place: "Mia's place, Main Street 5", time: '19:30' },
     },
@@ -40,6 +41,7 @@ function seed() {
     },
     [keys[3]]: {
       players: ['demo0', 'demo1', 'demo2'],
+      times: { demo0: '19:00', demo1: '19:30', demo2: '20:00' },
       games: [
         { id: 13, name: 'Catan', year: 1995, by: 'demo0' },
         { id: 230802, name: 'Azul', year: 2017, by: 'demo1' },
@@ -47,7 +49,7 @@ function seed() {
       votes: { g13: ['demo0'], g230802: ['demo1', 'demo2'] },
       brings: { g13: ['demo0'] },
     },
-    [keys[5]]: { players: ['demo1', 'demo2', 'demo3', 'demo0'], games: [] },
+    [keys[5]]: { players: ['demo1', 'demo2', 'demo3', 'demo0'], times: { demo1: '18:30', demo3: '20:30' }, games: [] },
     [keys[6]]: { players: ['demo3'], games: [] },
   };
 
@@ -203,15 +205,26 @@ export function create() {
       persist(); emit();
     },
 
-    async setAvailability(playerId, add, remove) {
+    // The time a player can start from on a day ('' = none, which counts as 17:00), kept beside the list of players.
+    async setAvailability(playerId, add, remove, time = '') {
+      const setTime = (d, t) => { if (t) (d.times ??= {})[playerId] = t; else if (d.times) delete d.times[playerId]; };
       for (const k of add) {
         const d = day(k);
         if (!d.players.includes(playerId)) d.players.push(playerId);
+        setTime(d, time);
       }
       for (const k of remove) {
         const d = day(k);
         d.players = d.players.filter((id) => id !== playerId);
+        setTime(d, '');
       }
+      persist(); emit();
+    },
+
+    async setAvailTime(date, playerId, time) {
+      const d = day(date);
+      if (time) (d.times ??= {})[playerId] = time;
+      else if (d.times) delete d.times[playerId];
       persist(); emit();
     },
 
@@ -251,6 +264,7 @@ export function create() {
       delete state.players[id];
       for (const d of Object.values(state.days)) {
         d.players = d.players.filter((p) => p !== id);
+        if (d.times) delete d.times[id];
         for (const map of [d.votes, d.brings]) {
           for (const [k, list] of Object.entries(map ?? {})) map[k] = list.filter((p) => p !== id);
         }

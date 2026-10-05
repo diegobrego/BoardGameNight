@@ -12,6 +12,7 @@ import { MAX_MY_GAMES, hasGame, withGame, withoutGame, toggleFav, ordered, match
 import { voteKey } from '../js/games.js';
 import { toPlain, buildBackup, backupName, withoutUndefined, buildPlay, parseBackup, restoreOps, cutoffFor, oldDayKeys } from '../js/admin.js';
 import { buildCatalog, ownedKeys, nobodyOwns, sortCatalog, withoutGameFrom, sharedDoc } from '../js/collection.js';
+import { DEFAULT_START, isTime, startTimesOf, latestStart } from '../js/times.js';
 import { buildSpecialDay, specialMap, splitSpecialDays, bavarianHolidays, holidaysBetween, NOTE_MAX, AHEAD_DAYS } from '../js/special.js';
 
 const encoder = new TextEncoder();
@@ -546,4 +547,27 @@ const root = new URL('..', import.meta.url);
   assert.equal(holidaysBetween('2026-12-25', '2026-12-25').length, 1, 'both ends are included');
   assert.deepEqual(holidaysBetween('2026-12-27', '2027-01-05').map((h) => h.date), ['2027-01-01']);
   console.log('ok  special days');
+}
+
+// ---- start times: when each player can start from on a day -------------------------------
+{
+  assert.equal(DEFAULT_START, '17:00');
+  assert.ok(isTime(DEFAULT_START) && isTime('00:00') && isTime('19:30') && isTime('23:59'));
+  for (const bad of ['', '7:30', '24:00', '19:60', '19:3', 'abc', null, undefined, 1930]) assert.equal(isTime(bad), false, `not a time: ${bad}`);
+
+  const times = { mia: '19:00', leo: '20:30', zoe: '', sam: 'later', gone: '22:00' };
+  assert.deepEqual(startTimesOf(times, ['mia', 'zoe', 'sam', 'new']), [
+    { id: 'mia', time: '19:00' }, { id: 'zoe', time: '17:00' }, { id: 'sam', time: '17:00' }, { id: 'new', time: '17:00' },
+  ], 'no time, a bad time, or no entry at all all mean the default (days picked before start times existed)');
+  assert.deepEqual(startTimesOf(undefined, ['mia']), [{ id: 'mia', time: '17:00' }], 'a day with no times at all');
+
+  assert.deepEqual(latestStart(times, ['mia', 'leo', 'zoe']), { time: '20:30', ids: ['leo'] }, 'the latest time anyone named');
+  assert.deepEqual(latestStart(times, ['mia', 'zoe']), { time: '19:00', ids: ['mia'] }, 'someone on the default does not hold it back when another is later');
+  assert.deepEqual(latestStart({ a: '19:00', b: '19:00', c: '18:00' }, ['a', 'b', 'c']), { time: '19:00', ids: ['a', 'b'] }, 'a tie names everyone');
+  assert.deepEqual(latestStart({ a: '16:00' }, ['a', 'b']), { time: '17:00', ids: ['b'] }, 'the default counts: an earlier time is not the latest');
+  assert.deepEqual(latestStart(times, ['zoe', 'sam']), { time: '17:00', ids: ['zoe', 'sam'] }, 'nobody named a time: everyone is at the default');
+  assert.equal(latestStart(times, ['mia', 'zoe']).time, '19:00', 'a time kept for someone who is not on the day ("gone", 22:00) is ignored');
+  assert.deepEqual(latestStart({ a: '09:30', b: '21:15' }, ['a', 'b']).time, '21:15', 'compared as times, not as plain numbers');
+  assert.deepEqual(latestStart({}, []), { time: '', ids: [] }, 'a day nobody is on');
+  console.log('ok  start times');
 }

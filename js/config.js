@@ -31,5 +31,9 @@ export const DAYS_AHEAD = 14;
 // nobody logged on the day can still be logged.
 export const DAYS_BEHIND = 7;
 
+// Where game nights usually happen. "Add location & time" starts with it filled in; whoever adds the
+// details can change it when the night is somewhere else.
+export const DEFAULT_PLACE = 'BB-Spiele';
+
 // The public address of the site. The WhatsApp messages the admin sends link to it.
 export const SITE_URL = 'https://diegobrego.github.io/BoardGameNight/';
