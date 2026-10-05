@@ -210,9 +210,24 @@ function rankGames(key) {
   return { ranked, topVotes: ranked[0]?.voters.length ?? 0 };
 }
 
+// A game night's place and start time. Only a day that is game on has any: with fewer players than that
+// (say, one of them dropped out) nothing shows, though what was saved is kept and comes back with the third
+// player. Details someone has saved win. Until then a day that is game on and still to come has the usual
+// place and the latest time anyone can start, so nobody has to add them; they follow the players' times
+// until someone saves details (a place saved empty stays empty).
+function detailsOf(key) {
+  if (savedIds(key).length < MIN_PLAYERS) return { place: '', time: '' };
+  const saved = state.days[key]?.details ?? {};
+  const auto = state.futureKeys.has(key);
+  return {
+    place: saved.place ?? (auto ? DEFAULT_PLACE : ''),
+    time: saved.time || (auto ? latestOn(key).time : ''),
+  };
+}
+
 // A game night's location and start time, e.g. "Mia's place · 19:30", or null if neither is set.
 function detailsLine(key) {
-  const { place = '', time = '' } = state.days[key]?.details ?? {};
+  const { place, time } = detailsOf(key);
   return [place, time].filter(Boolean).join(' · ') || null;
 }
 
@@ -246,7 +261,7 @@ function whatsappText(kind, day) {
     : [`🎲 Game night on ${when}?`, `Available so far: ${listNames(ids, 99)}`];
   if (where) lines.push(`📍 ${where}`);
   const latest = latestOn(day.key).time;                // no start time set yet: say when everyone is free from
-  if (latest && !state.days[day.key]?.details?.time) lines.push(`🕗 Everyone is free from ${latest}`);
+  if (latest && !detailsOf(day.key).time) lines.push(`🕗 Everyone is free from ${latest}`);
   if (pick) lines.push(pick);
   lines.push(kind === 'remind' ? `Details and votes: ${SITE_URL}` : `Pick your days and vote: ${SITE_URL}`);
   return lines.join('\n');
@@ -378,7 +393,7 @@ function dayTile(d) {
     'day', mine && 'is-mine', go && 'is-go', d.isWeekend && 'is-weekend', d.isPast && 'is-past',
     d.isToday && 'is-today', changed && 'is-changed', !ids.length && 'is-empty', note && 'is-special',
   ].filter(Boolean).join(' ');
-  const time = go ? (state.days[d.key]?.details?.time ?? '') : '';      // a game night with a start time shows it above the faces
+  const time = go ? detailsOf(d.key).time : '';      // a game night with a start time shows it above the faces
   const label = `${longLabel(d.date)}: ${plural(ids.length, 'player')} available${go ? (d.isPast ? ', was a game night' : ', game on') : ''}${mine ? ', including you' : ''}${campaigns.length ? `, campaign session: ${campaigns.map((c) => c.title).join(', ')}${myCampaign ? " (you're in it)" : ''}` : ''}${d.isPast && go ? (logged ? ', logged' : ', not logged yet') : ''}${time ? `, ${d.isPast ? 'was at' : 'starts at'} ${time}` : ''}${note ? `, special day: ${note}` : ''}`;
   const faces = ids.map((id) => avatar(state.players[id].avatar, 22, state.players[id].name)).join('');
   const sub = d.isToday ? 'Today' : d.num === 1 ? d.month : '';
@@ -879,9 +894,9 @@ function renderDayPanel() {
   }).join('');
 
   // Where and when, adding it to a calendar, and logging what was played (today and last week).
-  const { place = '', time = '' } = state.days[key]?.details ?? {};
+  const { place, time } = detailsOf(key);
   const hasDetails = !!(place || time);
-  const showDetails = go || hasDetails;
+  const showDetails = go && (hasDetails || canAct);       // only a game night has a place and time (a past one only if it had them)
   const canLog = day.isToday || past;
   const loggedHere = canLog ? state.plays.filter((p) => p.date === key) : [];
   const dayButtons = [
@@ -954,7 +969,7 @@ function renderDayPanel() {
   };
 
   // Game options fold like the other lists (remembered on this device). A short list starts open,
-  // a long one closed. Closed, the most-voted game stays on show, with a note about the rest.
+  // a long one closed. Closed, the most-voted game stays on show.
   // The rules of the game ("how many players make a game night", who can vote) live behind the ?
   // button instead of taking up room here all the time.
   const before = rowTops($('#dp-list'));     // where each game is now, so a game that moves can slide
@@ -971,8 +986,7 @@ function renderDayPanel() {
     ${canSuggest || past ? '' : '<p class="muted">Ideas open up once someone is available.</p>'}`;
 
   $('#dp-preview').innerHTML = foldable && !open
-    ? `<div class="fold-preview"><ul class="games">${row(ranked[0])}</ul>${ranked.length > 1
-      ? `<p class="muted fold-note">+${ranked.length - 1} more. Tap "Game options" to see them all.</p>` : ''}</div>`
+    ? `<div class="fold-preview"><ul class="games">${row(ranked[0])}</ul></div>`
     : '';
   $('#dp-list').hidden = foldable && !open;
   $('#dp-list').innerHTML = ranked.length
@@ -1399,7 +1413,7 @@ async function submitDetails(form) {
 function addToCalendar() {
   const day = dayByKey(state.openKey);
   if (!day) return;
-  const { place = '', time = '' } = state.days[day.key]?.details ?? {};
+  const { place, time } = detailsOf(day.key);
   const description = [
     `Available: ${listNames(savedIds(day.key).sort(byName), 99)}`,
     topPickLine(day.key),
